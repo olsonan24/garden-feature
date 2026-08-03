@@ -3,11 +3,14 @@ const SESSION_CONTEXT = "jarvis-dashboard-session-v1";
 
 type AuthEnv = { JARVIS_PASSCODE?: string };
 
-async function getPasscode(): Promise<string> {
-  const runtime = await import("cloudflare:workers");
-  const passcode = (runtime.env as unknown as AuthEnv).JARVIS_PASSCODE;
-  if (!passcode) throw new Error("JARVIS_PASSCODE is not configured");
-  return passcode;
+import { getCloudflareRuntime } from "./cloudflare-runtime";
+
+async function getPasscode(): Promise<string | null> {
+  const processPasscode = process.env.JARVIS_PASSCODE?.trim();
+  if (processPasscode) return processPasscode;
+
+  const runtime = await getCloudflareRuntime<AuthEnv>();
+  return runtime?.JARVIS_PASSCODE?.trim() || null;
 }
 
 async function digest(value: string): Promise<string> {
@@ -35,14 +38,18 @@ function constantTimeEqual(left: string, right: string): boolean {
 }
 
 async function expectedSession(): Promise<string> {
-  return digest(`${SESSION_CONTEXT}:${await getPasscode()}`);
+  const passcode = await getPasscode();
+  if (!passcode) throw new Error("JARVIS_PASSCODE is not configured");
+  return digest(`${SESSION_CONTEXT}:${passcode}`);
 }
 
 export async function verifyPasscode(candidate: string): Promise<boolean> {
-  return constantTimeEqual(candidate, await getPasscode());
+  const passcode = await getPasscode();
+  return Boolean(passcode) && constantTimeEqual(candidate, passcode!);
 }
 
 export async function isAuthorizedCookie(cookieHeader: string | null): Promise<boolean> {
+  if (!(await getPasscode())) return true;
   const session = cookieValue(cookieHeader, COOKIE_NAME);
   if (!session) return false;
   return constantTimeEqual(session, await expectedSession());
@@ -50,6 +57,7 @@ export async function isAuthorizedCookie(cookieHeader: string | null): Promise<b
 
 export async function isAuthorizedRequest(request: Request): Promise<boolean> {
   if (process.env.NODE_ENV === "development") return true;
+  if (!(await getPasscode())) return true;
   return isAuthorizedCookie(request.headers.get("cookie"));
 }
 

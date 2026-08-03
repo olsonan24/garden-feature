@@ -1,12 +1,14 @@
 import { buildPeriodAnalysis, type KnownSku, type PeriodPayload } from "../../../lib/analyze-reports";
 import { identifyReportType, parseAmazonReport, type ReportSummary } from "../../../lib/report-parser";
 import { isAuthorizedRequest } from "../../../lib/jarvis-auth";
+import { getCloudflareRuntime, type D1Database, type R2Bucket } from "../../../lib/cloudflare-runtime";
 
 type StorageEnv = { DB: D1Database; BUCKET: R2Bucket };
 
 async function getRuntime() {
-  const runtime = await import("cloudflare:workers");
-  return runtime.env as unknown as StorageEnv;
+  const runtime = await getCloudflareRuntime<StorageEnv>();
+  if (!runtime?.DB || !runtime.BUCKET) throw new Error("Persistent report storage is not configured for this deployment.");
+  return runtime;
 }
 
 async function ensureSchema(db: D1Database) {
@@ -111,6 +113,6 @@ export async function POST(request: Request) {
     await runtime.DB.batch(writes);
     return Response.json({ imports: created, period }, { status: 201 });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Upload failed" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Upload failed" }, { status: 503 });
   }
 }

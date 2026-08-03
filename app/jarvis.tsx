@@ -321,7 +321,7 @@ function NeuralCore({ thinking }: { thinking: boolean }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const context = canvas.getContext("2d");
+    const context = canvas.getContext("2d")!;
     if (!context) return;
 
     type CoreNode = { x: number; y: number; radius: number; phaseX: number; phaseY: number; drift: number; flash: number; depth: number };

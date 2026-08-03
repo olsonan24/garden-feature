@@ -1,11 +1,13 @@
 import { isAuthorizedRequest } from "../../../lib/jarvis-auth";
 import { accountsSeed, actionSeed, importSeed, seedPeriod, seedSkus } from "../../../lib/jarvis-seed";
+import { getCloudflareRuntime, type D1Database } from "../../../lib/cloudflare-runtime";
 
 type DbEnv = { DB: D1Database };
 
 async function ensureSchema() {
-  const runtime = await import("cloudflare:workers");
-  const db = (runtime.env as unknown as DbEnv).DB;
+  const runtime = await getCloudflareRuntime<DbEnv>();
+  const db = runtime?.DB;
+  if (!db) throw new Error("Persistent storage is not configured for this deployment.");
   await db.batch([
     db.prepare("CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'healthy', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skus (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
@@ -48,11 +50,8 @@ export async function GET(request: Request) {
       periods: savedPeriods.length ? savedPeriods : [seedPeriod],
       reviews: savedReviews,
     }, { headers: { "cache-control": "no-store" } });
-  } catch (error) {
-    if (process.env.NODE_ENV === "development") {
-      return Response.json({ accounts: accountsSeed, skus: seedSkus, imports: importSeed, actions: actionSeed, periods: [seedPeriod], reviews: [] }, { headers: { "cache-control": "no-store" } });
-    }
-    return Response.json({ error: error instanceof Error ? error.message : "State unavailable" }, { status: 500 });
+  } catch {
+    return Response.json({ accounts: accountsSeed, skus: seedSkus, imports: importSeed, actions: actionSeed, periods: [seedPeriod], reviews: [] }, { headers: { "cache-control": "no-store", "x-jarvis-storage": "demo" } });
   }
 }
 
@@ -75,6 +74,6 @@ export async function POST(request: Request) {
     }
     return Response.json({ ok: true });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Save failed" }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Save failed" }, { status: 503 });
   }
 }

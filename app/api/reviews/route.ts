@@ -1,6 +1,7 @@
 import { fetchAmazonReviewSnapshot, validateAmazonListingUrl } from "../../../lib/amazon-listing";
 import { isAuthorizedRequest } from "../../../lib/jarvis-auth";
 import type { DashboardSku, ReviewHistoryPoint } from "../../../lib/analyze-reports";
+import { getCloudflareRuntime, type D1Database } from "../../../lib/cloudflare-runtime";
 
 type DbEnv = { DB: D1Database };
 
@@ -23,8 +24,9 @@ export async function POST(request: Request) {
     const listingUrl = validateAmazonListingUrl(String(input.listingUrl || "")).toString();
     if (!skuId || !accountId) return Response.json({ error: "SKU and account are required." }, { status: 400 });
 
-    const runtime = await import("cloudflare:workers");
-    const db = (runtime.env as unknown as DbEnv).DB;
+    const runtime = await getCloudflareRuntime<DbEnv>();
+    const db = runtime?.DB;
+    if (!db) return Response.json({ error: "Persistent review storage is not configured for this deployment.", canEnterManually: true }, { status: 503 });
     await db.prepare("CREATE TABLE IF NOT EXISTS skus (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     const row = await db.prepare("SELECT payload FROM skus WHERE id = ? AND account_id = ?").bind(skuId, accountId).first();
     const current = parseSku(row?.payload);
