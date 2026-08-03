@@ -246,12 +246,7 @@
 .jarvis-data-note { display: block; margin-top: 7px; color: #557085; font-size: 8px; line-height: 1.4; }
 
 .economics-panel { grid-column: 1 / -1; border-color: #3a5467; }
-.economics-key { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; color: #91a8b9; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .55px; }
-.economics-key span { display: inline-flex; align-items: center; gap: 6px; }
-.economics-key i { width: 11px; height: 11px; border-radius: 3px; }
-.economics-key .manual i { background: #d9ecfb; border: 1px solid #7db4dc; }
-.economics-key .formula i { background: #ffe699; border: 1px solid #e7bf38; }
-.economics-inputs { margin-top: 12px; padding-bottom: 16px; display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 9px; align-items: stretch; border-bottom: 1px solid #19384e; }
+.economics-inputs { margin-top: 16px; padding-bottom: 16px; display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 9px; align-items: stretch; border-bottom: 1px solid #19384e; }
 .economics-input { min-width: 0; padding: 11px; border: 1px solid #7db4dc; border-radius: 8px; background: #d9ecfb; box-shadow: inset 0 1px rgba(255,255,255,.7); }
 .economics-input > span { display: block; min-height: 22px; margin-bottom: 6px; color: #153e5b; font-size: 9px; font-weight: 800; line-height: 1.25; text-transform: uppercase; letter-spacing: .35px; }
 .economics-input > div { height: 35px; padding: 0 8px; display: flex; align-items: center; gap: 4px; border: 1px solid #8ebbd8; border-radius: 6px; background: rgba(255,255,255,.72); }

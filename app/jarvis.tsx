@@ -567,8 +567,7 @@ function SkuEconomicsPanel({ sku, onSave }: { sku: DashboardSku; onSave: (sku: D
     finally { setSaving(false); }
   }
 
-  return <Panel className="economics-panel" title="Unit Economics" sub="PSMs enter every blue field. Yellow fields calculate automatically from the Garden breakeven formulas.">
-    <div className="economics-key"><span className="manual"><i />PSM manual input</span><span className="formula"><i />Formula output</span></div>
+  return <Panel className="economics-panel" title="Unit Economics">
     <form className="economics-inputs" onSubmit={saveCosts}>
       <EconomicsInput label="Unit sale price" value={price} onChange={setPrice} prefix="$" />
       <EconomicsInput label="Amazon referral" value={referralRate} onChange={setReferralRate} suffix="%" step="0.1" />
