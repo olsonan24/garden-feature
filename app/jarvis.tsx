@@ -108,7 +108,7 @@ export default function Jarvis() {
       setAccounts(loadedAccounts); setSkus(loadedSkus); setPeriods(loadedPeriods); setImports(data.imports || []); setActions(data.actions || []); setReviews(data.reviews || []);
       const firstAccount = loadedAccounts[0]?.id || "";
       const firstPeriod = loadedPeriods.find((period: PeriodPayload) => period.accountId === firstAccount && period.kind === "weekly");
-      setAccountId(firstAccount); setPeriodId(firstPeriod?.id || ""); setSkuId(firstPeriod?.skus?.[0]?.id || loadedSkus.find((sku: DashboardSku) => sku.accountId === firstAccount)?.id || "");
+      setAccountId(firstAccount); setPeriodId(firstPeriod?.id || ""); setSkuId("");
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 3500); return () => clearTimeout(timer); }, [toast]);
@@ -119,7 +119,7 @@ export default function Jarvis() {
   const latestMonthlyPeriod = periods.filter((period) => period.accountId === accountId && period.kind === "monthly").sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
   const funnelPeriod = selectedPeriod.funnel.length ? selectedPeriod : latestMonthlyPeriod;
   const accountSkus = mergeSkuData(selectedPeriod.skus, skus.filter((sku) => sku.accountId === accountId));
-  const selectedSku = accountSkus.find((sku) => sku.id === skuId) || accountSkus[0];
+  const selectedSku = skuId ? accountSkus.find((sku) => sku.id === skuId) : undefined;
   const matchingPortfolioPeriods = periods.filter((period) => period.kind === "weekly" && period.startDate === selectedPeriod.startDate && period.endDate === selectedPeriod.endDate);
   const portfolioPeriods = matchingPortfolioPeriods.length ? matchingPortfolioPeriods : [selectedPeriod];
   const portfolioMetrics = aggregateMetrics(portfolioPeriods);
@@ -132,17 +132,33 @@ export default function Jarvis() {
   const reviewDraft = reviewDrafts[currentReviewKey] ?? currentReview?.note ?? "";
   const completedThisWeek = accountActions.filter((action) => action.status === "completed" && action.completedPeriodId === selectedPeriod.id);
   const wins = actionWins(selectedPeriod, periods, accountActions);
+  const accountScopeMetrics = selectedSku ? {
+    netSales: selectedSku.netSales,
+    netProceeds: selectedSku.profit,
+    adSpend: selectedSku.adSpend,
+    sessions: selectedSku.sessions,
+    inventory: selectedSku.inventory,
+  } : {
+    netSales: selectedPeriod.metrics.netSales,
+    netProceeds: selectedPeriod.metrics.netProceeds,
+    adSpend: selectedPeriod.metrics.adSpend,
+    sessions: selectedPeriod.metrics.sessions,
+    inventory: selectedPeriod.metrics.inventory,
+  };
+  const accountScopeWeekly = selectedSku ? skuSalesTrend(periods, accountId, selectedSku, selectedPeriod.endDate) : accountWeekly;
+  const accountScopeRevenueChange = selectedSku ? skuNetRevenueChange(selectedPeriod, periods, selectedSku) : netRevenueChange(selectedPeriod);
+  const accountScopeRevenueNote = selectedSku ? skuWowNote(selectedPeriod, periods, selectedSku) : wowNote(selectedPeriod, "netSales");
 
   function changeAccount(value: string) {
     setAccountId(value);
     const latest = periods.filter((period) => period.accountId === value && period.kind === "weekly").sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
-    if (latest) { setPeriodId(latest.id); setSkuId(latest.skus[0]?.id || ""); }
-    else { setPeriodId(""); setSkuId(skus.find((sku) => sku.accountId === value)?.id || ""); }
+    if (latest) setPeriodId(latest.id);
+    else setPeriodId("");
+    setSkuId("");
   }
   function changePeriod(value: string) {
     setPeriodId(value);
-    const period = periods.find((item) => item.id === value);
-    if (period?.skus.length) setSkuId(period.skus[0].id);
+    setSkuId("");
   }
   const post = (body: Record<string, unknown>) => fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const go = (next: View) => { setView(next); setMobile(false); };
@@ -188,7 +204,7 @@ export default function Jarvis() {
       setImports((current) => unique([...(body.imports || []), ...current]));
       if (body.period) {
         const period = body.period as PeriodPayload;
-        setPeriods((current) => unique([period, ...current.filter((item) => item.id !== period.id)])); setSkus((current) => unique([...current, ...period.skus])); setPeriodId(period.id); setSkuId(period.skus[0]?.id || "");
+        setPeriods((current) => unique([period, ...current.filter((item) => item.id !== period.id)])); setSkus((current) => unique([...current, ...period.skus])); setPeriodId(period.id); setSkuId("");
       }
       setToast(stayInReview ? "Report loaded. The business review preview has been refreshed." : "Reports parsed. The saved week and recommendations are ready.");
       if (!stayInReview) setModal(null);
@@ -230,9 +246,9 @@ export default function Jarvis() {
 
       {view === "accounts" && <section><Title eyebrow="Account command center" title={account.name} sub={`${accountSkus.length} SKUs · ${selectedPeriod.label}`} right={<div className="buttons"><button className="secondary" onClick={() => setModal("editAccount")}><Pencil /> Edit Name</button><button className="secondary" onClick={() => setModal("sku")}><PackagePlus /> Add SKU</button><button className="primary" onClick={() => go("review")}><ClipboardCheck /> Start Weekly Business Review</button></div>} />
         <JarvisCompanion key={`account-${account.id}-${selectedPeriod.id}`} account={account} period={selectedPeriod} periods={periods} skus={accountSkus} actions={accountActions} scope="account" revenueChangePercent={netRevenueChange(selectedPeriod)} />
-        <div className="account-revenue"><div><small>PRIMARY ACCOUNT METRIC</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(selectedPeriod.metrics.netSales)}</strong><RevenueDelta value={netRevenueChange(selectedPeriod)} /></div><p>{wowNote(selectedPeriod, "netSales")} · after refunds</p></div><div className="account-chart"><WeeklySalesChart data={accountWeekly} compact /></div></div>
-        <div className="account-strip">{[["Net proceeds", money(selectedPeriod.metrics.netProceeds)], ["Ad spend", money(selectedPeriod.metrics.adSpend)], ["Sessions", integer(selectedPeriod.metrics.sessions)], ["FBA inventory", integer(selectedPeriod.metrics.inventory)], ["Open actions", String(openActionCount(selectedPeriod, accountActions))]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
-        <div className="tabs">{accountSkus.map((sku) => <button key={sku.id} className={selectedSku?.id === sku.id ? "active" : ""} onClick={() => setSkuId(sku.id)}>{sku.name}</button>)}</div>
+        <div className="account-revenue"><div><small>{selectedSku ? "PRIMARY SKU METRIC" : "PRIMARY ACCOUNT METRIC"}</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(accountScopeMetrics.netSales)}</strong><RevenueDelta value={accountScopeRevenueChange} /></div><p>{accountScopeRevenueNote} · after refunds</p></div><div className="account-chart"><WeeklySalesChart data={accountScopeWeekly} compact /></div></div>
+        <div className="account-strip">{[["Net proceeds", money(accountScopeMetrics.netProceeds)], ["Ad spend", money(accountScopeMetrics.adSpend)], ["Sessions", integer(accountScopeMetrics.sessions)], ["FBA inventory", integer(accountScopeMetrics.inventory)], ["Open actions", String(openActionCount(selectedPeriod, accountActions, selectedSku?.id))]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
+        <div className="tabs"><button className={!selectedSku ? "active" : ""} onClick={() => setSkuId("")}>Total</button>{accountSkus.map((sku) => <button key={sku.id} className={selectedSku?.id === sku.id ? "active" : ""} onClick={() => setSkuId(sku.id)}>{sku.name}</button>)}</div>
         {selectedSku ? <div className="sku-grid"><Panel className="sku-main" title={selectedSku.name} sub={`${selectedSku.sku} · ${selectedSku.asin || "ASIN not mapped"}`}><div className="sku-metrics">{[["Net revenue", money(selectedSku.netSales)], ["Net proceeds", money(selectedSku.profit)], ["Sessions", integer(selectedSku.sessions)], ["Conversion", pct(selectedSku.conversion)], ["Ad spend", money(selectedSku.adSpend)], ["Ad sales", money(selectedSku.adSales)], ["ACoS", pct(selectedSku.adSales ? selectedSku.adSpend / selectedSku.adSales * 100 : selectedSku.adSpend ? 999 : 0)]].map(([label, value]) => <div key={label}><span>{label}</span><b className={label === "Net proceeds" && selectedSku.profit < 0 ? "bad" : ""}>{value}</b></div>)}<div><span>Total order units</span><b>{integer(selectedSku.units)}</b><small className="sku-metric-note">Includes {integer(selectedSku.b2bUnits || 0)} B2B</small></div></div></Panel><InventorySnapshot sku={selectedSku} period={selectedPeriod} periods={periods} /><ListingReputation sku={selectedSku} onSaved={(updated) => setSkus((current) => unique([...current.filter((item) => item.id !== updated.id), updated]))} onToast={setToast} /><SkuEconomicsPanel key={selectedSku.id} sku={selectedSku} onSave={saveSkuEconomics} /><Panel title="What Happened" className="danger"><p className="copy">{selectedSku.issue}</p></Panel><Panel title="Recommended Change" className="recommend"><p className="copy">{selectedSku.recommendation}</p><button className="link" onClick={() => setModal("action")}>Add to checklist <ChevronRight /></button></Panel></div> : <Panel title="No SKU data" sub="Add a SKU manually or upload the weekly report package."><button className="primary" onClick={() => setModal("sku")}><PackagePlus /> Add SKU</button></Panel>}
         <ActionChecklist period={selectedPeriod} account={account} skus={accountSkus} actions={accountActions} onToggleAction={toggleAction} onToggleRecommendation={toggleRecommendation} onAdd={() => setModal("action")} />
         <Panel title="SKU Directory" sub={`All products attached to ${account.name}`} right={<label className="search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU or ASIN" /></label>}><Table><thead><tr><th>Product</th><th>SKU / ASIN</th><th>Net Revenue</th><th>Sessions</th><th>Units</th><th>Conversion</th><th>Inventory</th><th>Net Proceeds</th></tr></thead><tbody>{accountSkus.filter((sku) => `${sku.name}${sku.sku}${sku.asin}`.toLowerCase().includes(search.toLowerCase())).map((sku) => <tr key={sku.id} onClick={() => setSkuId(sku.id)}><td><b>{sku.name}</b></td><td>{sku.sku}<small>{sku.asin}</small></td><td><b>{money(sku.netSales)}</b></td><td>{integer(sku.sessions)}</td><td>{integer(sku.units)}</td><td>{pct(sku.conversion)}</td><td>{integer(sku.inventory)}</td><td className={sku.profit < 0 ? "bad" : ""}>{money(sku.profit)}</td></tr>)}</tbody></Table></Panel>
@@ -732,13 +748,18 @@ function mergeSkuData(periodSkus: DashboardSku[], savedSkus: DashboardSku[]) {
   return [...merged.values()];
 }
 function accountSalesTrend(periods: PeriodPayload[], accountId: string, throughEndDate: string, limit = 12): WeeklySalesPoint[] { return periods.filter((period) => period.kind === "weekly" && period.accountId === accountId && period.endDate <= throughEndDate).sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit).map((period) => ({ startDate: period.startDate, endDate: period.endDate, label: period.label, sales: period.metrics.netSales })); }
+function matchingSku(period: PeriodPayload, sku: DashboardSku) { return period.skus.find((candidate) => candidate.id === sku.id || Boolean(sku.sku && candidate.sku && candidate.sku.toLowerCase() === sku.sku.toLowerCase()) || Boolean(sku.asin && candidate.asin && candidate.asin.toLowerCase() === sku.asin.toLowerCase())); }
+function skuSalesTrend(periods: PeriodPayload[], accountId: string, sku: DashboardSku, throughEndDate: string, limit = 12): WeeklySalesPoint[] { return periods.filter((period) => period.kind === "weekly" && period.accountId === accountId && period.endDate <= throughEndDate).sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit).map((period) => ({ startDate: period.startDate, endDate: period.endDate, label: period.label, sales: matchingSku(period, sku)?.netSales || 0 })); }
+function previousSku(period: PeriodPayload, periods: PeriodPayload[], sku: DashboardSku) { const previousPeriod = periods.filter((candidate) => candidate.accountId === period.accountId && candidate.kind === "weekly" && candidate.endDate < period.startDate).sort((a, b) => b.endDate.localeCompare(a.endDate))[0]; return previousPeriod ? matchingSku(previousPeriod, sku) : undefined; }
+function skuNetRevenueChange(period: PeriodPayload, periods: PeriodPayload[], sku: DashboardSku) { const prior = previousSku(period, periods, sku); if (!prior) return undefined; return prior.netSales ? (sku.netSales - prior.netSales) / Math.abs(prior.netSales) * 100 : sku.netSales ? 100 : 0; }
+function skuWowNote(period: PeriodPayload, periods: PeriodPayload[], sku: DashboardSku) { const prior = previousSku(period, periods, sku); if (!prior) return "First saved comparison period"; const delta = sku.netSales - prior.netSales; return `${delta >= 0 ? "+" : ""}${money(delta)} vs prior week`; }
 function portfolioSalesTrend(periods: PeriodPayload[], throughEndDate: string, limit = 12): WeeklySalesPoint[] { const map = new Map<string, WeeklySalesPoint>(); for (const period of periods.filter((item) => item.kind === "weekly" && item.endDate <= throughEndDate)) { const key = `${period.startDate}:${period.endDate}`; const row = map.get(key) || { startDate: period.startDate, endDate: period.endDate, label: period.label, sales: 0 }; row.sales += period.metrics.netSales; map.set(key, row); } return [...map.values()].sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit); }
 function wowNote(period: PeriodPayload, metric: keyof DashboardMetrics, suffix = "") { const value = period.wow[metric]; if (value === undefined) return "First saved comparison period"; const direction = value > 0 ? "+" : ""; return `${direction}${suffix === "points" ? value.toFixed(1) : metric.toLowerCase().includes("sales") || metric === "netProceeds" ? money(value) : integer(value)}${suffix ? ` ${suffix}` : ""} vs prior week`; }
 function placementNote(period: PeriodPayload) { const best = period.placements.filter((item) => item.sales > 0).sort((a, b) => a.acos - b.acos)[0]; return best ? `${best.placement} performed best` : "No converting placement yet"; }
 function formatDate(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }); }
 function formatShortDate(value: string) { const parsed = new Date(`${value}T12:00:00Z`); return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }); }
 function formatWeekRange(startDate: string, endDate: string) { return `${formatShortDate(startDate)}–${formatShortDate(endDate)}`; }
-function openActionCount(period: PeriodPayload, actions: ActionItem[]) { const completedRecs = new Set(actions.filter((action) => action.status === "completed").map((action) => action.id)); return period.recommendations.filter((_, index) => !completedRecs.has(`rec-${period.id}-${index}`)).length + actions.filter((action) => !action.id.startsWith(`rec-${period.id}-`) && action.status !== "completed").length; }
+function openActionCount(period: PeriodPayload, actions: ActionItem[], skuId?: string) { const completedRecs = new Set(actions.filter((action) => action.status === "completed").map((action) => action.id)); const recommendations = period.recommendations.filter((item, index) => (!skuId || item.skuId === skuId) && !completedRecs.has(`rec-${period.id}-${index}`)).length; const manual = actions.filter((action) => (!skuId || action.skuId === skuId) && !action.id.startsWith(`rec-${period.id}-`) && action.status !== "completed").length; return recommendations + manual; }
 function executiveSummary(period: PeriodPayload) { const change = period.wow.netSales; const movement = change === undefined ? "This is the first saved comparison period." : `Net revenue ${change >= 0 ? "increased" : "declined"} ${money(Math.abs(change))} week over week.`; const profit = period.metrics.netProceeds >= 0 ? `The account produced ${money(period.metrics.netProceeds)} in net proceeds.` : `The account reported a ${money(Math.abs(period.metrics.netProceeds))} loss after Amazon costs and advertising.`; return `${movement} ${profit} ${integer(period.metrics.sessions)} sessions produced ${integer(period.metrics.units)} units, while advertising ran at ${pct(period.metrics.acos)} ACoS.`; }
 function netRevenueChange(period: PeriodPayload) { const delta = period.wow.netSales; if (delta === undefined) return undefined; const previous = period.metrics.netSales - delta; return previous ? delta / Math.abs(previous) * 100 : period.metrics.netSales ? 100 : 0; }
 function portfolioNetRevenueChange(current: PeriodPayload[], all: PeriodPayload[]) { const previous = current.map((period) => all.filter((candidate) => candidate.accountId === period.accountId && candidate.kind === "weekly" && candidate.endDate < period.startDate).sort((a, b) => b.endDate.localeCompare(a.endDate))[0]).filter((period): period is PeriodPayload => Boolean(period)); if (!previous.length) return undefined; const currentRevenue = current.reduce((total, period) => total + period.metrics.netSales, 0); const previousRevenue = previous.reduce((total, period) => total + period.metrics.netSales, 0); return previousRevenue ? (currentRevenue - previousRevenue) / Math.abs(previousRevenue) * 100 : currentRevenue ? 100 : 0; }
