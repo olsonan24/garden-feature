@@ -18,6 +18,8 @@ export type ProductPartial = {
   asin?: string;
   name?: string;
   sales?: number;
+  orderedProductSales?: number;
+  b2bSales?: number;
   netSales?: number;
   units?: number;
   b2bUnits?: number;
@@ -202,6 +204,8 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         source: type,
         ...identity,
         sales: number(read(row, "Gross Sales", "Product Sales", "Sales Revenue", "Total Sales", "Ordered Product Sales")),
+        orderedProductSales: number(read(row, "Ordered Product Sales", "Product Sales", "Sales Revenue", "Gross Sales")),
+        b2bSales: number(read(row, "Ordered Product Sales - B2B")),
         netSales: number(read(row, "Net Sales", "Net Product Sales", "Sales After Refunds")),
         units: number(read(row, "Units Sold", "Net Units", "Units Ordered", "Quantity")),
         refunds: number(read(row, "Units Refunded", "Refunded Units", "Returns", "Refund Quantity")),
@@ -220,6 +224,8 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         units: number(read(row, "Units Ordered", "Units Ordered - B2B", "Units")),
         b2bUnits: number(read(row, "Units Ordered - B2B")),
         sales: number(read(row, "Ordered Product Sales", "Ordered Product Sales - B2B", "Sales")),
+        orderedProductSales: number(read(row, "Ordered Product Sales", "Sales")),
+        b2bSales: number(read(row, "Ordered Product Sales - B2B")),
         conversion: number(read(row, "Unit Session Percentage", "Unit Session Percentage - B2B", "Conversion Rate")),
         buyBox: number(read(row, "Featured Offer (Buy Box) Percentage", "Buy Box Percentage", "Buy Box")),
       });

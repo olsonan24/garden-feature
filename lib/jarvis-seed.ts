@@ -17,12 +17,14 @@ export const seedSkus: DashboardSku[] = [
   ["pots", "Pots & Pans Set", "Caldwell PotPanSet", "B0FL4M9TH5", 0, 3, 0, 0, 0, 0, 0, -30.93, 36, 36, 0, 0, "attention", "The listing received almost no traffic and incurred storage cost without a sale.", "Confirm listing availability before deciding whether to advertise or discontinue."],
 ].map((row) => {
   const [id, name, sku, asin, sales, sessions, units, conversion, adSpend, adSales, adOrders, profit, inventory, fulfillable, reserved, transfer, status, issue, recommendation] = row as [string, string, string, string, number, number, number, number, number, number, number, number, number, number, number, number, Status, string, string];
-  return { id, accountId: "caldwell", name, sku, asin, sales, netSales: sales, sessions, units, b2bUnits: id === "knife" ? 1 : 0, refunds: 0, conversion, adSpend, adSales, adOrders, clicks: 0, profit, storage: name === "Pot & Pan Shelf" ? 72.86 : name === "Whiskey Smoker" ? 36.63 : 0, cogs: 0, inventory, fulfillable, reserved, transfer, unsellable: name === "Salt & Pepper Grinders" ? 1 : 0, inbound: 0, status, issue, recommendation };
+  const refunds = id === "coffee" ? 2 : id === "salt" ? 1 : 0;
+  const refundAmount = id === "coffee" ? 47.98 : id === "salt" ? 16.99 : 0;
+  return { id, accountId: "caldwell", name, sku, asin, sales, orderedProductSales: sales, b2bSales: 0, refundAmount, netSales: sales - refundAmount, sessions, units, b2bUnits: id === "knife" ? 1 : 0, refunds, conversion, adSpend, adSales, adOrders, clicks: 0, profit, storage: name === "Pot & Pan Shelf" ? 72.86 : name === "Whiskey Smoker" ? 36.63 : 0, cogs: 0, inventory, fulfillable, reserved, transfer, unsellable: name === "Salt & Pepper Grinders" ? 1 : 0, inbound: 0, status, issue, recommendation };
 });
 
 export const seedPeriod: PeriodPayload = {
   id: "caldwell:2026-07-19:2026-07-25", accountId: "caldwell", startDate: "2026-07-19", endDate: "2026-07-25", label: "Jul 19, 2026 to Jul 25, 2026", kind: "weekly", status: "critical",
-  metrics: { grossSales: 258.68, netSales: 193.71, netProceeds: -346.98, storage: 184.01, adSpend: 214.84, adSales: 286.87, clicks: 390, adOrders: 13, sessions: 432, units: 12, refunds: 0, inventory: 735, fulfillable: 577, acos: 74.9, tacos: 83.2, conversion: 2.78 },
+  metrics: { grossSales: 260.89, netSales: 195.92, netProceeds: -346.98, storage: 184.01, adSpend: 214.84, adSales: 286.87, clicks: 390, adOrders: 13, sessions: 432, units: 12, refunds: 3, inventory: 735, fulfillable: 577, acos: 74.9, tacos: 82.35, conversion: 2.78 },
   wow: {}, skus: seedSkus,
   daily: [["2026-07-19", 48.89, 23.99], ["2026-07-20", 32.06, 0], ["2026-07-21", 25.54, 64.97], ["2026-07-22", 23.44, 49.98], ["2026-07-23", 26.71, 24.99], ["2026-07-24", 24.96, 66.97], ["2026-07-25", 33.24, 55.97]].map(([date, spend, sales]) => ({ date: String(date), spend: Number(spend), sales: Number(sales), orders: 0, clicks: 0 })),
   insights: [

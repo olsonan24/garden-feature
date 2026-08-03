@@ -14,6 +14,9 @@ export type KnownSku = {
   name: string;
   sku: string;
   asin: string;
+  orderedProductSales?: number;
+  b2bSales?: number;
+  refundAmount?: number;
   listingUrl?: string;
   reviewRating?: number;
   reviewCount?: number;
@@ -228,14 +231,21 @@ export function buildPeriodAnalysis(args: {
     const traffic = bucket.traffic || { source: "Business Report by Child ASIN" as const };
     const ads = bucket.ads || { source: "Advertised Product" as const };
     const inventory = bucket.inventory || { source: "Manage FBA Inventory" as const };
+    const orderedProductSales = round(finance.orderedProductSales || traffic.orderedProductSales || finance.sales || traffic.sales || 0);
+    const b2bSales = round(finance.b2bSales || traffic.b2bSales || 0);
+    const refundAmount = round(Math.abs(finance.refundAmount || 0));
+    const grossRevenue = round(orderedProductSales + b2bSales);
     const base = {
       id: bucket.id,
       accountId,
       name: bucket.name,
       sku: bucket.sku,
       asin: bucket.asin,
-      sales: round(finance.sales || traffic.sales || 0),
-      netSales: round(finance.netSales || Math.max(0, (finance.sales || traffic.sales || 0) - Math.abs(finance.refundAmount || 0))),
+      sales: grossRevenue,
+      orderedProductSales,
+      b2bSales,
+      refundAmount,
+      netSales: round(grossRevenue - refundAmount),
       sessions: round(traffic.sessions || 0, 0),
       units: round(traffic.units || finance.units || 0, 0),
       b2bUnits: round(traffic.b2bUnits || 0, 0),
