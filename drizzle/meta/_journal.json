@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1785650244665,
+      "tag": "0000_fast_dexter_bennett",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785651448347,
+      "tag": "0001_demonic_sersi",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785654666583,
+      "tag": "0002_serious_epoch",
+      "breakpoints": true
+    }
+  ]
+}
