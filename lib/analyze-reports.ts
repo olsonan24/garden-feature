@@ -21,8 +21,15 @@ export type KnownSku = {
   reviewSource?: "amazon" | "manual";
   reviewUpdatedAt?: string;
   reviewHistory?: ReviewHistoryPoint[];
+  manualSalePrice?: number;
+  manualReferralRate?: number;
   manualFbaFeePerUnit?: number;
+  manualStorageCostPerUnit?: number;
+  manualInboundCostPerUnit?: number;
   manualCogsPerUnit?: number;
+  manualAngoraRate?: number;
+  manualAdSales?: number;
+  manualAdSpend?: number;
 };
 
 export type DashboardSku = KnownSku & {
@@ -252,8 +259,15 @@ export function buildPeriodAnalysis(args: {
       reviewSource: bucket.reviewSource,
       reviewUpdatedAt: bucket.reviewUpdatedAt,
       reviewHistory: bucket.reviewHistory,
+      manualSalePrice: bucket.manualSalePrice,
+      manualReferralRate: bucket.manualReferralRate,
       manualFbaFeePerUnit: bucket.manualFbaFeePerUnit,
+      manualStorageCostPerUnit: bucket.manualStorageCostPerUnit,
+      manualInboundCostPerUnit: bucket.manualInboundCostPerUnit,
       manualCogsPerUnit: bucket.manualCogsPerUnit,
+      manualAngoraRate: bucket.manualAngoraRate,
+      manualAdSales: bucket.manualAdSales,
+      manualAdSpend: bucket.manualAdSpend,
     };
     return { ...base, status: statusFor(base), issue: productIssue(base), recommendation: productRecommendation(base, candidates) };
   }).filter((product) => product.sku || product.asin);

@@ -104,8 +104,15 @@ export async function POST(request: Request) {
           reviewSource: known.reviewSource,
           reviewUpdatedAt: known.reviewUpdatedAt,
           reviewHistory: known.reviewHistory,
+          manualSalePrice: known.manualSalePrice,
+          manualReferralRate: known.manualReferralRate,
           manualFbaFeePerUnit: known.manualFbaFeePerUnit,
+          manualStorageCostPerUnit: known.manualStorageCostPerUnit,
+          manualInboundCostPerUnit: known.manualInboundCostPerUnit,
           manualCogsPerUnit: known.manualCogsPerUnit,
+          manualAngoraRate: known.manualAngoraRate,
+          manualAdSales: known.manualAdSales,
+          manualAdSpend: known.manualAdSpend,
         } : {};
         return runtime.DB.prepare("INSERT OR REPLACE INTO skus (id, account_id, payload) VALUES (?, ?, ?)").bind(sku.id, accountId, JSON.stringify({ ...sku, ...preserved }));
       }),

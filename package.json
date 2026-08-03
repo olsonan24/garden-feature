@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "build:sites": "bash scripts/build-verified.sh",
-    "test": "node --test tests/rendered-html.test.mjs",
+    "test": "node --test tests/rendered-html.test.mjs tests/unit-economics.test.ts",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"

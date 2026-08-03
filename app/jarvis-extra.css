@@ -246,29 +246,29 @@
 .jarvis-data-note { display: block; margin-top: 7px; color: #557085; font-size: 8px; line-height: 1.4; }
 
 .economics-panel { grid-column: 1 / -1; border-color: #3a5467; }
-.manual-costs { margin-top: 17px; padding-bottom: 15px; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto; gap: 9px; align-items: end; border-bottom: 1px solid #19384e; }
-.manual-costs label > span, .scenario-control > span { display: block; margin-bottom: 7px; color: #9eb0bf; font-size: 9px; font-weight: 700; }
-.manual-costs label > div { height: 40px; padding: 0 10px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 7px; background: #03101c; }
-.manual-costs label > div:focus-within { border-color: var(--amber); }
-.manual-costs label b, .exact-number b { color: var(--muted); font-size: 10px; }
-.manual-costs input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: white; }
-.manual-costs button { min-height: 40px; }
-.manual-costs svg { width: 14px; }
+.economics-key { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; color: #91a8b9; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .55px; }
+.economics-key span { display: inline-flex; align-items: center; gap: 6px; }
+.economics-key i { width: 11px; height: 11px; border-radius: 3px; }
+.economics-key .manual i { background: #d9ecfb; border: 1px solid #7db4dc; }
+.economics-key .formula i { background: #ffe699; border: 1px solid #e7bf38; }
+.economics-inputs { margin-top: 12px; padding-bottom: 16px; display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 9px; align-items: stretch; border-bottom: 1px solid #19384e; }
+.economics-input { min-width: 0; padding: 11px; border: 1px solid #7db4dc; border-radius: 8px; background: #d9ecfb; box-shadow: inset 0 1px rgba(255,255,255,.7); }
+.economics-input > span { display: block; min-height: 22px; margin-bottom: 6px; color: #153e5b; font-size: 9px; font-weight: 800; line-height: 1.25; text-transform: uppercase; letter-spacing: .35px; }
+.economics-input > div { height: 35px; padding: 0 8px; display: flex; align-items: center; gap: 4px; border: 1px solid #8ebbd8; border-radius: 6px; background: rgba(255,255,255,.72); }
+.economics-input > div:focus-within { border-color: #0e5f94; box-shadow: 0 0 0 2px rgba(14,95,148,.14); }
+.economics-input b { color: #3c6680; font-size: 10px; }
+.economics-input input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #061f31; text-align: right; font-size: 12px; font-weight: 750; }
+.economics-save { min-height: 80px; align-self: stretch; justify-content: center; }
+.economics-save svg { width: 14px; }
 .imported-cost-note { margin: 11px 0 0; color: #698297; font-size: 9px; }
 .imported-cost-note b { color: #aebfcb; }
-.scenario-controls { margin-top: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 17px; }
-.range-row { display: grid; grid-template-columns: minmax(100px, 1fr) 90px; gap: 9px; align-items: center; }
-.range-row > input[type="range"] { width: 100%; accent-color: var(--amber); }
-.exact-number { height: 37px; padding: 0 8px; display: flex; align-items: center; gap: 3px; border: 1px solid #29475d; border-radius: 6px; background: #03101c; }
-.exact-number:focus-within { border-color: var(--amber); }
-.exact-number input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: white; text-align: right; font-size: 11px; }
-.scenario-results { margin-top: 18px; display: grid; grid-template-columns: repeat(4, 1fr); overflow: hidden; border: 1px solid #1d3c51; border-radius: 8px; }
-.scenario-results > div { min-height: 88px; padding: 14px; border-right: 1px solid #1d3c51; background: #04121e; }
-.scenario-results > div:last-child { border: 0; }
-.scenario-results span, .scenario-results strong, .scenario-results small { display: block; }
-.scenario-results span { color: var(--muted); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
-.scenario-results strong { margin-top: 8px; font-size: 20px; }
-.scenario-results small { margin-top: 5px; color: #607b90; font-size: 8px; }
+.economics-formulas { margin-top: 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.economics-formula { min-height: 100px; padding: 14px; border: 1px solid #e7bf38; border-radius: 8px; background: #ffe699; color: #342a08; box-shadow: inset 0 1px rgba(255,255,255,.62); }
+.economics-formula span, .economics-formula strong, .economics-formula small { display: block; }
+.economics-formula span { color: #68520b; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; }
+.economics-formula strong { margin-top: 8px; color: #1f1a06; font-size: 20px; }
+.economics-formula strong.bad { color: #a51c16; }
+.economics-formula small { margin-top: 6px; color: #745f19; font-size: 8px; line-height: 1.4; }
 .scenario-formula { margin: 10px 0 0; color: #5f788c; font-size: 8px; line-height: 1.5; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -278,9 +278,8 @@
   .date-fields, .report-grid.monthly { grid-template-columns: 1fr; }
   .jarvis-command { padding: 17px; }
   .neural-core { width: 190px; }
-  .scenario-controls, .manual-costs, .scenario-results { grid-template-columns: 1fr; }
-  .scenario-results > div { border-right: 0; border-bottom: 1px solid #1d3c51; }
-  .scenario-results > div:last-child { border-bottom: 0; }
+  .economics-inputs, .economics-formulas { grid-template-columns: 1fr; }
+  .economics-save { min-height: 44px; }
 }
 @media (max-width: 1150px) {
   .revenue-grid, .account-revenue, .review-layout { grid-template-columns: 1fr; }
@@ -289,7 +288,8 @@
   .review-report-list { grid-template-columns: repeat(2, 1fr); }
   .jarvis-command { grid-template-columns: 220px minmax(0,1fr); }
   .neural-core { width: 210px; }
-  .scenario-controls { grid-template-columns: 1fr; }
+  .economics-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .economics-formulas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .net-revenue-hero { padding: 22px; }
@@ -305,5 +305,5 @@
   .jarvis-command { grid-template-columns: 1fr; }
   .jarvis-visual { padding-top: 8px; }
   .jarvis-prompts { display: none; }
-  .manual-costs { grid-template-columns: 1fr; }
+  .economics-inputs, .economics-formulas { grid-template-columns: 1fr; }
 }

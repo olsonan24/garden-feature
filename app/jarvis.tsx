@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { DashboardMetrics, DashboardSku, PeriodPayload, Status } from "../lib/analyze-reports";
+import { calculateUnitEconomics } from "../lib/unit-economics";
 
 type View = "overview" | "accounts" | "imports" | "review";
 type Account = { id: string; name: string; status: Status };
@@ -23,6 +24,49 @@ const money = (value: number) => new Intl.NumberFormat("en-US", { style: "curren
 const integer = (value: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value || 0);
 const pct = (value: number) => value >= 900 ? "No ad sales" : `${(value || 0).toFixed(1)}%`;
 const unique = <T extends { id: string }>(items: T[]) => [...new Map(items.map((item) => [item.id, item])).values()];
+const LOCAL_ECONOMICS_KEY = "jarvis:manual-economics:v1";
+
+type ManualEconomicsValues = Pick<DashboardSku,
+  "manualSalePrice" | "manualReferralRate" | "manualFbaFeePerUnit" |
+  "manualStorageCostPerUnit" | "manualInboundCostPerUnit" | "manualCogsPerUnit" |
+  "manualAngoraRate" | "manualAdSales" | "manualAdSpend"
+>;
+
+function manualEconomicsValues(sku: DashboardSku): ManualEconomicsValues {
+  return {
+    manualSalePrice: sku.manualSalePrice,
+    manualReferralRate: sku.manualReferralRate,
+    manualFbaFeePerUnit: sku.manualFbaFeePerUnit,
+    manualStorageCostPerUnit: sku.manualStorageCostPerUnit,
+    manualInboundCostPerUnit: sku.manualInboundCostPerUnit,
+    manualCogsPerUnit: sku.manualCogsPerUnit,
+    manualAngoraRate: sku.manualAngoraRate,
+    manualAdSales: sku.manualAdSales,
+    manualAdSpend: sku.manualAdSpend,
+  };
+}
+
+function readLocalEconomics(): Record<string, ManualEconomicsValues> {
+  try { return JSON.parse(localStorage.getItem(LOCAL_ECONOMICS_KEY) || "{}") as Record<string, ManualEconomicsValues>; }
+  catch { return {}; }
+}
+
+function applyLocalEconomics(skus: DashboardSku[]) {
+  const overrides = readLocalEconomics();
+  return skus.map((sku) => overrides[sku.id] ? { ...sku, ...overrides[sku.id] } : sku);
+}
+
+function setLocalEconomics(sku: DashboardSku, keep: boolean) {
+  try {
+    const overrides = readLocalEconomics();
+    if (keep) overrides[sku.id] = manualEconomicsValues(sku);
+    else delete overrides[sku.id];
+    localStorage.setItem(LOCAL_ECONOMICS_KEY, JSON.stringify(overrides));
+  } catch {
+    // The in-memory update still keeps the current PSM session usable when a
+    // browser blocks storage entirely.
+  }
+}
 
 function previousCompletedWeek() {
   const today = new Date();
@@ -60,7 +104,7 @@ export default function Jarvis() {
   useEffect(() => {
     fetch("/api/state").then((response) => response.ok ? response.json() : null).then((data) => {
       if (!data) return;
-      const loadedAccounts = data.accounts || [], loadedSkus = data.skus || [], loadedPeriods = (data.periods || []).sort((a: PeriodPayload, b: PeriodPayload) => b.endDate.localeCompare(a.endDate));
+      const loadedAccounts = data.accounts || [], loadedSkus = applyLocalEconomics(data.skus || []), loadedPeriods = (data.periods || []).sort((a: PeriodPayload, b: PeriodPayload) => b.endDate.localeCompare(a.endDate));
       setAccounts(loadedAccounts); setSkus(loadedSkus); setPeriods(loadedPeriods); setImports(data.imports || []); setActions(data.actions || []); setReviews(data.reviews || []);
       const firstAccount = loadedAccounts[0]?.id || "";
       const firstPeriod = loadedPeriods.find((period: PeriodPayload) => period.accountId === firstAccount && period.kind === "weekly");
@@ -163,8 +207,10 @@ export default function Jarvis() {
   }
   async function saveSkuEconomics(updated: DashboardSku) {
     setSkus((current) => unique([updated, ...current.filter((item) => item.id !== updated.id)]));
-    await post({ kind: "sku", ...updated });
-    setToast(`Manual economics saved for ${updated.name}.`);
+    const response = await post({ kind: "sku", ...updated }).catch(() => null);
+    const savedToServer = Boolean(response?.ok);
+    setLocalEconomics(updated, !savedToServer);
+    setToast(savedToServer ? `Manual economics saved for ${updated.name}.` : `Manual economics saved in this browser for ${updated.name}.`);
   }
 
   if (loading) return <main className="login-shell"><section className="login-card loading-card"><div className="login-mark"><Sparkles /></div><small>SECURE PORTFOLIO INTELLIGENCE</small><h1>JARVIS</h1><p>Loading your command center...</p></section></main>;
@@ -488,40 +534,75 @@ function NeuralCore({ thinking }: { thinking: boolean }) {
 function SkuEconomicsPanel({ sku, onSave }: { sku: DashboardSku; onSave: (sku: DashboardSku) => Promise<void> }) {
   const averagePrice = sku.units ? (sku.netSales || sku.sales) / sku.units : 24.99;
   const importedCogsPerUnit = sku.units ? sku.cogs / sku.units : sku.cogs;
-  const initialOrganic = sku.netSales > 0 && sku.adSales <= sku.netSales ? Math.max(0, (1 - sku.adSales / sku.netSales) * 100) : 50;
+  const importedStoragePerUnit = sku.units ? sku.storage / sku.units : sku.storage;
+  const [price, setPrice] = useState(sku.manualSalePrice ?? Math.max(.01, averagePrice));
+  const [referralRate, setReferralRate] = useState(sku.manualReferralRate ?? 15);
   const [fbaFee, setFbaFee] = useState(sku.manualFbaFeePerUnit ?? 0);
+  const [storageCost, setStorageCost] = useState(sku.manualStorageCostPerUnit ?? importedStoragePerUnit ?? 0);
+  const [inboundCost, setInboundCost] = useState(sku.manualInboundCostPerUnit ?? 0);
   const [cogs, setCogs] = useState(sku.manualCogsPerUnit ?? importedCogsPerUnit ?? 0);
-  const [price, setPrice] = useState(Math.max(.01, averagePrice));
-  const [tacos, setTacos] = useState(sku.netSales ? Math.min(100, sku.adSpend / sku.netSales * 100) : 25);
-  const [organicShare, setOrganicShare] = useState(initialOrganic);
+  const [angoraRate, setAngoraRate] = useState(sku.manualAngoraRate ?? 5);
+  const [adSales, setAdSales] = useState(sku.manualAdSales ?? sku.adSales);
+  const [adSpend, setAdSpend] = useState(sku.manualAdSpend ?? sku.adSpend);
   const [saving, setSaving] = useState(false);
-  const referralFee = price * .15;
-  const adCostPerUnit = price * tacos / 100;
-  const contribution = price - referralFee - fbaFee - cogs - adCostPerUnit;
-  const margin = price ? contribution / price * 100 : 0;
-  const paidShare = Math.max(0, 100 - organicShare);
-  const impliedAcos = paidShare ? tacos / (paidShare / 100) : 0;
-  const breakEvenTacos = price ? Math.max(0, (price - referralFee - fbaFee - cogs) / price * 100) : 0;
   const currentUnits = Math.max(0, sku.units);
+  const economics = calculateUnitEconomics({ salePrice: price, referralRate, fbaFee, storageCost, inboundCost, cogs, angoraRate, adSales, adSpend, units: currentUnits });
 
   async function saveCosts(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true);
-    try { await onSave({ ...sku, manualFbaFeePerUnit: Math.max(0, fbaFee), manualCogsPerUnit: Math.max(0, cogs) }); }
+    try {
+      await onSave({
+        ...sku,
+        manualSalePrice: Math.max(0, price),
+        manualReferralRate: Math.max(0, referralRate),
+        manualFbaFeePerUnit: Math.max(0, fbaFee),
+        manualStorageCostPerUnit: Math.max(0, storageCost),
+        manualInboundCostPerUnit: Math.max(0, inboundCost),
+        manualCogsPerUnit: Math.max(0, cogs),
+        manualAngoraRate: Math.max(0, angoraRate),
+        manualAdSales: Math.max(0, adSales),
+        manualAdSpend: Math.max(0, adSpend),
+      });
+    }
     finally { setSaving(false); }
   }
 
-  return <Panel className="economics-panel" title="Unit Economics & Scenario Lab" sub="Manual costs are saved to this SKU. Scenario controls are temporary and never overwrite imported history.">
-    <form className="manual-costs" onSubmit={saveCosts}><label><span>FBA fee / unit</span><div><b>$</b><input type="number" min="0" step="0.01" value={fbaFee} onChange={(event) => setFbaFee(Number(event.target.value))} /></div></label><label><span>COGS / unit</span><div><b>$</b><input type="number" min="0" step="0.01" value={cogs} onChange={(event) => setCogs(Number(event.target.value))} /></div></label><button className="secondary" disabled={saving}><Save />{saving ? "Saving..." : "Save Costs"}</button></form>
-    <p className="imported-cost-note">Imported SKU Economics COGS total: <b>{money(sku.cogs)}</b>{sku.units > 0 ? ` (${money(importedCogsPerUnit)} per reported unit)` : ""}. Manual values drive only the scenario below.</p>
-    <div className="scenario-controls"><SliderNumber label="Selling price" value={price} onChange={setPrice} min={.01} max={Math.max(100, Math.ceil(averagePrice * 2))} step={.25} prefix="$" exactStep="0.01" /><SliderNumber label="TACOS" value={tacos} onChange={setTacos} min={0} max={100} step={.5} suffix="%" exactStep="0.1" /><SliderNumber label="Organic share" value={organicShare} onChange={setOrganicShare} min={0} max={100} step={1} suffix="%" exactStep="0.1" /></div>
-    <div className="scenario-results"><div><span>Contribution / unit</span><strong className={contribution < 0 ? "bad" : ""}>{money(contribution)}</strong><small>{margin.toFixed(1)}% margin</small></div><div><span>At current units</span><strong className={contribution < 0 ? "bad" : ""}>{money(contribution * currentUnits)}</strong><small>{integer(currentUnits)} units</small></div><div><span>Implied ACoS</span><strong>{paidShare ? pct(impliedAcos) : "Organic only"}</strong><small>{paidShare.toFixed(1)}% paid share</small></div><div><span>Break-even TACOS</span><strong>{pct(breakEvenTacos)}</strong><small>15% referral assumption</small></div></div>
-    <p className="scenario-formula">Price minus 15% referral fee, manual FBA fee, manual COGS, and advertising at the selected TACOS. Storage, returns, coupons, and other Amazon charges are excluded.</p>
+  return <Panel className="economics-panel" title="Unit Economics" sub="PSMs enter every blue field. Yellow fields calculate automatically from the Garden breakeven formulas.">
+    <div className="economics-key"><span className="manual"><i />PSM manual input</span><span className="formula"><i />Formula output</span></div>
+    <form className="economics-inputs" onSubmit={saveCosts}>
+      <EconomicsInput label="Unit sale price" value={price} onChange={setPrice} prefix="$" />
+      <EconomicsInput label="Amazon referral" value={referralRate} onChange={setReferralRate} suffix="%" step="0.1" />
+      <EconomicsInput label="FBA fees / unit" value={fbaFee} onChange={setFbaFee} prefix="$" />
+      <EconomicsInput label="Storage cost / unit" value={storageCost} onChange={setStorageCost} prefix="$" />
+      <EconomicsInput label="FBA inbound / unit" value={inboundCost} onChange={setInboundCost} prefix="$" />
+      <EconomicsInput label="COGS / unit" value={cogs} onChange={setCogs} prefix="$" />
+      <EconomicsInput label="Angora" value={angoraRate} onChange={setAngoraRate} suffix="%" step="0.1" />
+      <EconomicsInput label="Ad sales" value={adSales} onChange={setAdSales} prefix="$" />
+      <EconomicsInput label="Ad spend" value={adSpend} onChange={setAdSpend} prefix="$" />
+      <button className="secondary economics-save" disabled={saving}><Save />{saving ? "Saving..." : "Save PSM Inputs"}</button>
+    </form>
+    <p className="imported-cost-note">Imported starting points: <b>{money(sku.adSales)} ad sales</b>, <b>{money(sku.adSpend)} ad spend</b>, and <b>{money(importedCogsPerUnit)} COGS per reported unit</b>. Saving locks the PSM values to this SKU.</p>
+    <div className="economics-formulas">
+      <EconomicsFormula label="Amazon fees" value={money(economics.amazonFees)} detail={`${referralRate.toFixed(1)}% × sale price`} />
+      <EconomicsFormula label="Angora billable" value={money(economics.angoraBillable)} detail={`${angoraRate.toFixed(1)}% × sale price`} />
+      <EconomicsFormula label="Breakeven before ads" value={money(economics.breakevenBeforeAds)} detail="Amazon + FBA + storage + inbound + COGS + Angora" />
+      <EconomicsFormula label="Ad cost / unit" value={money(economics.adCostPerUnit)} detail={`${money(adSpend)} ÷ ${integer(currentUnits)} units`} />
+      <EconomicsFormula label="ACoS" value={pct(economics.acos)} detail="Ad spend ÷ ad sales" />
+      <EconomicsFormula label="Total cost / unit" value={money(economics.totalCostPerUnit)} detail="Breakeven + advertising" />
+      <EconomicsFormula label="Net proceeds / unit" value={money(economics.netProceedsPerUnit)} detail="Sale price − total cost" negative={economics.netProceedsPerUnit < 0} />
+      <EconomicsFormula label="Net profit margin" value={pct(economics.netProfitMargin)} detail="Net proceeds ÷ sale price" negative={economics.netProfitMargin < 0} />
+      <EconomicsFormula label="At current units" value={money(economics.netProceedsAtCurrentUnits)} detail={`${integer(currentUnits)} units after ads`} negative={economics.netProceedsAtCurrentUnits < 0} />
+    </div>
+    <p className="scenario-formula">Sheet formula mapping: Amazon Fees = Sale Price × Referral %, Angora Billable = Sale Price × Angora %, Breakeven = Amazon Fees + FBA Fees + Storage + Inbound + COGS + Angora Billable, ACoS = Ad Spend ÷ Ad Sales, and NPM = Net Proceeds ÷ Sale Price.</p>
   </Panel>;
 }
 
-function SliderNumber({ label, value, onChange, min, max, step, prefix, suffix, exactStep }: { label: string; value: number; onChange: (value: number) => void; min: number; max: number; step: number; prefix?: string; suffix?: string; exactStep: string }) {
-  const safe = Number.isFinite(value) ? value : 0;
-  return <label className="scenario-control"><span>{label}</span><div className="range-row"><input type="range" min={min} max={max} step={step} value={Math.min(max, Math.max(min, safe))} onChange={(event) => onChange(Number(event.target.value))} /><div className="exact-number">{prefix && <b>{prefix}</b>}<input type="number" min={min} step={exactStep} value={Number(safe.toFixed(prefix ? 2 : 1))} onChange={(event) => onChange(Number(event.target.value))} />{suffix && <b>{suffix}</b>}</div></div></label>;
+function EconomicsInput({ label, value, onChange, prefix, suffix, step = "0.01" }: { label: string; value: number; onChange: (value: number) => void; prefix?: string; suffix?: string; step?: string }) {
+  return <label className="economics-input"><span>{label}</span><div>{prefix && <b>{prefix}</b>}<input type="number" min="0" step={step} value={Number.isFinite(value) ? value : 0} onChange={(event) => onChange(Math.max(0, Number(event.target.value)))} />{suffix && <b>{suffix}</b>}</div></label>;
+}
+
+function EconomicsFormula({ label, value, detail, negative = false }: { label: string; value: string; detail: string; negative?: boolean }) {
+  return <div className="economics-formula"><span>{label}</span><strong className={negative ? "bad" : ""}>{value}</strong><small>{detail}</small></div>;
 }
 
 function buildJarvisAnswer(question: string, context: { account: Account; period: PeriodPayload; periods: PeriodPayload[]; skus: DashboardSku[]; actions: ActionItem[]; scope: "portfolio" | "account"; metrics: DashboardMetrics; revenueChangePercent?: number }) {
@@ -544,7 +625,7 @@ function buildJarvisAnswer(question: string, context: { account: Account; period
     const manual = namedSku.manualFbaFeePerUnit !== undefined || namedSku.manualCogsPerUnit !== undefined ? ` Manual inputs currently show ${money(namedSku.manualFbaFeePerUnit || 0)} FBA and ${money(namedSku.manualCogsPerUnit || 0)} COGS per unit.` : " Manual FBA and COGS have not both been confirmed yet.";
     return `${namedSku.name} generated ${money(namedSku.netSales)} in net revenue from ${integer(namedSku.units)} units, with ${money(namedSku.profit)} in reported net proceeds. Advertising spent ${money(namedSku.adSpend)} at ${pct(skuAcos)} ACoS. ${namedSku.issue} ${namedSku.recommendation}${manual}`;
   }
-  if (/ad|advert|ppc|acos|tacos|campaign/.test(q)) return `${label} spent ${money(metrics.adSpend)} on advertising and attributed ${money(metrics.adSales)} in ad sales at ${pct(metrics.acos)} ACoS and ${pct(metrics.tacos)} TACOS. That produced ${integer(metrics.adOrders)} attributed orders from ${integer(metrics.clicks)} clicks. ${period.insights.find((item) => /advert/i.test(item.title))?.detail || placementNote(period)}`;
+  if (/ad|advert|ppc|acos|campaign/.test(q)) return `${label} spent ${money(metrics.adSpend)} on advertising and attributed ${money(metrics.adSales)} in ad sales at ${pct(metrics.acos)} ACoS. That produced ${integer(metrics.adOrders)} attributed orders from ${integer(metrics.clicks)} clicks. ${period.insights.find((item) => /advert/i.test(item.title))?.detail || placementNote(period)}`;
   if (/organic/.test(q)) {
     if (!metrics.netSales) return `There is no net revenue in the selected week, so I cannot calculate an organic share.`;
     if (metrics.adSales > metrics.netSales) return `Amazon attributed ${money(metrics.adSales)} in ad sales against ${money(metrics.netSales)} in net revenue. Because attribution windows can cross reporting periods, ad-attributed sales exceed the weekly total here, so an exact organic share would be misleading.`;
@@ -610,8 +691,15 @@ function mergeSkuData(periodSkus: DashboardSku[], savedSkus: DashboardSku[]) {
       reviewSource: saved.reviewSource ?? period.reviewSource,
       reviewUpdatedAt: saved.reviewUpdatedAt ?? period.reviewUpdatedAt,
       reviewHistory: saved.reviewHistory ?? period.reviewHistory,
+      manualSalePrice: saved.manualSalePrice ?? period.manualSalePrice,
+      manualReferralRate: saved.manualReferralRate ?? period.manualReferralRate,
       manualFbaFeePerUnit: saved.manualFbaFeePerUnit ?? period.manualFbaFeePerUnit,
+      manualStorageCostPerUnit: saved.manualStorageCostPerUnit ?? period.manualStorageCostPerUnit,
+      manualInboundCostPerUnit: saved.manualInboundCostPerUnit ?? period.manualInboundCostPerUnit,
       manualCogsPerUnit: saved.manualCogsPerUnit ?? period.manualCogsPerUnit,
+      manualAngoraRate: saved.manualAngoraRate ?? period.manualAngoraRate,
+      manualAdSales: saved.manualAdSales ?? period.manualAdSales,
+      manualAdSpend: saved.manualAdSpend ?? period.manualAdSpend,
     });
   }
   return [...merged.values()];
