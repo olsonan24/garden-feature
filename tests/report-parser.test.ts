@@ -12,7 +12,7 @@ function workbook(rows: Record<string, unknown>[]) {
 
 test("parses and joins a complete weekly report package", () => {
   const economics = parseAmazonReport(workbook([{ SKU: "TEST-1", ASIN: "B000TEST01", "Product Name": "Test Product", "Gross Sales": 100, "Net Sales": 90, "Units Sold": 7, "Units Refunded": 1, COGS: 20, "Net Proceeds": 10, "Storage Fees": 5, Advertising: 30 }]), "SKU_Economics_report.xlsx");
-  const business = parseAmazonReport(workbook([{ "(Child) ASIN": "B000TEST01", Title: "Test Product", "Sessions - Total": 100, "Units Ordered": 4, "Ordered Product Sales": 101, "Unit Session Percentage": "4%" }]), "BusinessReport.csv");
+  const business = parseAmazonReport(workbook([{ "(Child) ASIN": "B000TEST01", Title: "Test Product", "Sessions - Total": 100, "Units Ordered": 4, "Units Ordered - B2B": 1, "Ordered Product Sales": 101, "Unit Session Percentage": "4%" }]), "BusinessReport.csv");
   const advertised = parseAmazonReport(workbook([{ Date: "2026-07-19", "Advertised SKU": "TEST-1", "Advertised ASIN": "B000TEST01", Spend: 30, "7 Day Total Sales": 75, "7 Day Total Orders (#)": 6, Clicks: 20 }]), "Sponsored_Products_Advertised_product_report.xlsx");
   const targeting = parseAmazonReport(workbook([{ "Advertised SKU": "TEST-1", Targeting: "test keyword", Spend: 12, "7 Day Total Sales": 0, "7 Day Total Orders (#)": 0, Clicks: 12 }]), "Sponsored_Products_Targeting_report.xlsx");
   const inventory = parseAmazonReport(workbook([{ sku: "TEST-1", asin: "B000TEST01", "product-name": "Test Product", "afn-warehouse-quantity": 40, "afn-fulfillable-quantity": 35, "afn-reserved-quantity": 5 }]), "Manage_FBA_Inventory.txt");
@@ -22,6 +22,7 @@ test("parses and joins a complete weekly report package", () => {
   assert.equal(result.metrics.sessions, 100);
   assert.equal(result.metrics.units, 4, "Child ASIN Units Ordered must be the authoritative sold-unit count");
   assert.equal(result.skus[0].units, 4);
+  assert.equal(result.skus[0].b2bUnits, 1, "B2B units must be retained as a subset of total ordered units");
   assert.equal(result.skus[0].adOrders, 6, "ad attribution remains separate from gross units sold");
   assert.equal(result.metrics.adSpend, 30);
   assert.equal(result.metrics.inventory, 40);

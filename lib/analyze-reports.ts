@@ -37,6 +37,7 @@ export type DashboardSku = KnownSku & {
   netSales: number;
   sessions: number;
   units: number;
+  b2bUnits?: number;
   refunds: number;
   conversion: number;
   adSpend: number;
@@ -237,6 +238,7 @@ export function buildPeriodAnalysis(args: {
       netSales: round(finance.netSales || Math.max(0, (finance.sales || traffic.sales || 0) - Math.abs(finance.refundAmount || 0))),
       sessions: round(traffic.sessions || 0, 0),
       units: round(traffic.units || finance.units || 0, 0),
+      b2bUnits: round(traffic.b2bUnits || 0, 0),
       refunds: round(finance.refunds || 0, 0),
       conversion: round(traffic.conversion || (traffic.sessions ? (traffic.units || 0) / traffic.sessions * 100 : 0)),
       adSpend: round(ads.adSpend || finance.adSpend || 0),

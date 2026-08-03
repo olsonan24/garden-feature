@@ -20,6 +20,7 @@ export type ProductPartial = {
   sales?: number;
   netSales?: number;
   units?: number;
+  b2bUnits?: number;
   refunds?: number;
   refundAmount?: number;
   cogs?: number;
@@ -217,6 +218,7 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         sessions: number(read(row, "Sessions - Total", "Sessions Total", "Sessions")),
         pageViews: number(read(row, "Page Views - Total", "Page Views Total", "Page Views")),
         units: number(read(row, "Units Ordered", "Units Ordered - B2B", "Units")),
+        b2bUnits: number(read(row, "Units Ordered - B2B")),
         sales: number(read(row, "Ordered Product Sales", "Ordered Product Sales - B2B", "Sales")),
         conversion: number(read(row, "Unit Session Percentage", "Unit Session Percentage - B2B", "Conversion Rate")),
         buyBox: number(read(row, "Featured Offer (Buy Box) Percentage", "Buy Box Percentage", "Buy Box")),

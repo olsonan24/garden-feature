@@ -17,7 +17,7 @@ export const seedSkus: DashboardSku[] = [
   ["pots", "Pots & Pans Set", "Caldwell PotPanSet", "B0FL4M9TH5", 0, 3, 0, 0, 0, 0, 0, -30.93, 36, 36, 0, 0, "attention", "The listing received almost no traffic and incurred storage cost without a sale.", "Confirm listing availability before deciding whether to advertise or discontinue."],
 ].map((row) => {
   const [id, name, sku, asin, sales, sessions, units, conversion, adSpend, adSales, adOrders, profit, inventory, fulfillable, reserved, transfer, status, issue, recommendation] = row as [string, string, string, string, number, number, number, number, number, number, number, number, number, number, number, number, Status, string, string];
-  return { id, accountId: "caldwell", name, sku, asin, sales, netSales: sales, sessions, units, refunds: 0, conversion, adSpend, adSales, adOrders, clicks: 0, profit, storage: name === "Pot & Pan Shelf" ? 72.86 : name === "Whiskey Smoker" ? 36.63 : 0, cogs: 0, inventory, fulfillable, reserved, transfer, unsellable: name === "Salt & Pepper Grinders" ? 1 : 0, inbound: 0, status, issue, recommendation };
+  return { id, accountId: "caldwell", name, sku, asin, sales, netSales: sales, sessions, units, b2bUnits: id === "knife" ? 1 : 0, refunds: 0, conversion, adSpend, adSales, adOrders, clicks: 0, profit, storage: name === "Pot & Pan Shelf" ? 72.86 : name === "Whiskey Smoker" ? 36.63 : 0, cogs: 0, inventory, fulfillable, reserved, transfer, unsellable: name === "Salt & Pepper Grinders" ? 1 : 0, inbound: 0, status, issue, recommendation };
 });
 
 export const seedPeriod: PeriodPayload = {

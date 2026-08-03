@@ -244,6 +244,7 @@
 .jarvis-chat button:disabled { opacity: .4; cursor: not-allowed; }
 .jarvis-chat svg { width: 16px; }
 .jarvis-data-note { display: block; margin-top: 7px; color: #557085; font-size: 8px; line-height: 1.4; }
+.sku-metric-note { display: block; margin-top: 5px; color: #6f879a; font-size: 8px; }
 
 .inventory-velocity { margin-top: 17px; padding-top: 15px; border-top: 1px solid #17354b; }
 .inventory-velocity-head { display: grid; gap: 9px; }
