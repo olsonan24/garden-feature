@@ -245,6 +245,19 @@
 .jarvis-chat svg { width: 16px; }
 .jarvis-data-note { display: block; margin-top: 7px; color: #557085; font-size: 8px; line-height: 1.4; }
 
+.inventory-velocity { margin-top: 17px; padding-top: 15px; border-top: 1px solid #17354b; }
+.inventory-velocity-head { display: grid; gap: 9px; }
+.inventory-velocity-head > span { color: #9eb0bf; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .45px; }
+.inventory-range { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.inventory-range button { min-height: 30px; padding: 0 5px; border: 1px solid #24455d; border-radius: 6px; background: #03101c; color: #7891a5; font-size: 8px; font-weight: 750; cursor: pointer; }
+.inventory-range button:hover { border-color: #ff850080; color: #f4f7fb; }
+.inventory-range button[aria-pressed="true"] { border-color: var(--amber); background: #ff850017; color: var(--amber); }
+.inventory-average { margin-top: 13px; display: flex; align-items: baseline; gap: 7px; }
+.inventory-average strong { font-size: 28px; letter-spacing: -.6px; }
+.inventory-average span { color: #7d96aa; font-size: 10px; }
+.inventory-velocity > p { margin: 7px 0 0; color: #688297; font-size: 8px; line-height: 1.45; }
+.inventory-velocity > small { display: block; margin-top: 7px; color: #9aafbe; font-size: 8px; line-height: 1.4; }
+
 .economics-panel { grid-column: 1 / -1; border-color: #3a5467; }
 .economics-inputs { margin-top: 16px; padding-bottom: 16px; display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 9px; align-items: stretch; border-bottom: 1px solid #19384e; }
 .economics-input { min-width: 0; padding: 11px; border: 1px solid #7db4dc; border-radius: 8px; background: #d9ecfb; box-shadow: inset 0 1px rgba(255,255,255,.7); }
