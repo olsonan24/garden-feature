@@ -99,7 +99,7 @@ function makeTaskProposal(account: JarvisAccountData, title: string, evidence: J
 export function executeJarvisCommand(command: string, data: JarvisDataContext): JarvisCommandResult {
   const raw = command.trim();
   const query = normalize(raw.replace(/^hey[, ]+jarvis[, ]*/i, ""));
-  if (!raw) return baseResult("UNKNOWN_COMMAND", "Enter a command, such as “take me to CaldwellMKH” or “show the mission queue.”", { confidence: 0, error: "Command is empty." });
+  if (!raw) return baseResult("UNKNOWN_COMMAND", "Enter a command, such as “take me to an account” or “show the mission queue.”", { confidence: 0, error: "Command is empty." });
 
   if (/^(open |show )?(settings|preferences)$/.test(query)) return baseResult("OPEN_SETTINGS", "Opening JARVIS settings. Future integrations remain clearly labeled until an administrator configures them.", { navigation: { view: "jarvis" } });
   if (/^(help|open help|show help|what can you do|commands|open commands|show commands)$/.test(query)) return baseResult("SHOW_HELP", "Try: “take me to [account]”, “analyze [account]”, “show blockers”, “show overdue tasks”, “show missing reports”, “draft weekly update”, “start weekly review”, “create task [title]”, or “open settings.” Data-changing proposals always require approval.");

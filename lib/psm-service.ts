@@ -102,6 +102,21 @@ async function existingPayload<T>(db: PersistentDatabase, table: string, idColum
   return row ? parsePayload<T>(row.payload) : null;
 }
 
+export async function readPsmRecord(db: PersistentDatabase, entity: PsmEntity, input: Record<string, unknown>): Promise<PsmRecord | null> {
+  const id = entity === "workflow" ? asString(input, "accountId") : asString(input, "id");
+  if (!id) return null;
+  const location: Record<PsmEntity, [string, string]> = {
+    workflow: ["account_workflows", "account_id"],
+    task: ["psm_tasks", "id"],
+    partnerRequest: ["partner_requests", "id"],
+    blocker: ["psm_blockers", "id"],
+    weeklyReview: ["weekly_reviews_v2", "id"],
+    event: ["account_events", "id"],
+  };
+  const [table, idColumn] = location[entity];
+  return existingPayload<PsmRecord>(db, table, idColumn, id);
+}
+
 async function saveEvent(db: PersistentDatabase, event: AccountEvent) {
   await db.run("INSERT INTO account_events (id, account_id, event_type, occurred_at, payload) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, event_type = excluded.event_type, occurred_at = excluded.occurred_at, payload = excluded.payload", [event.id, event.accountId, event.eventType, event.occurredAt, JSON.stringify(event)]);
 }

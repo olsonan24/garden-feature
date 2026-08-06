@@ -19,9 +19,10 @@ import type {
 } from "../lib/jarvis-types";
 import type { DashboardSku, PeriodPayload } from "../lib/analyze-reports";
 import { emptyPsmState, type PsmState, type StorageStatus } from "../lib/psm-types";
+import type { AuditRecommendation } from "../lib/audit/shared/audit-recommendation";
+import type { VoicePermissionState } from "../lib/voice-permission";
 
 type JarvisHistoryItem = { id: string; command: string; response: string; intent: string; timestamp: string };
-type VoiceAvailability = "checking" | "available" | "unavailable";
 type JarvisAppearance = { grid: boolean; glow: boolean; compact: boolean; animation: "reduced" | "standard"; hudIntensity: "low" | "standard" | "high" };
 
 export type JarvisAssistantContextValue = {
@@ -40,7 +41,7 @@ export type JarvisAssistantContextValue = {
   pendingApproval: JarvisSuggestedAction | null;
   settingsOpen: boolean;
   commandCenterActive: boolean;
-  voiceAvailability: VoiceAvailability;
+  voiceAvailability: VoicePermissionState;
   voiceEnabled: boolean;
   demoDataWarning: string;
   psmError: string;
@@ -54,16 +55,16 @@ export type JarvisAssistantContextValue = {
   setMode: (mode: JarvisAssistantMode) => void;
   setCommandText: (text: string) => void;
   setSettingsOpen: (open: boolean) => void;
-  setVoiceAvailability: (availability: VoiceAvailability) => void;
+  setVoiceAvailability: (availability: VoicePermissionState) => void;
   setVoiceEnabled: (enabled: boolean) => void;
   setDraftText: (text: string) => void;
   setAssistantName: (name: string) => void;
   updateAppearance: (updates: Partial<JarvisAppearance>) => void;
   runCommand: (command?: string) => Promise<JarvisCommandResult | null>;
-  chooseSuggestedAction: (action: JarvisSuggestedAction) => void;
-  updatePendingApproval: (fields: Record<string, string | boolean>) => void;
+  chooseSuggestedAction: (action: JarvisSuggestedAction) => Promise<void>;
+  updatePendingApproval: (fields: Record<string, string | boolean>) => Promise<void>;
   approvePendingAction: () => Promise<void>;
-  cancelPendingAction: () => void;
+  cancelPendingAction: () => Promise<void>;
   reportError: (message: string) => void;
   refreshPsm: () => Promise<void>;
 };
@@ -96,13 +97,13 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
   const [suggestedActions, setSuggestedActions] = useState<JarvisSuggestedAction[]>([]);
   const [pendingApproval, setPendingApproval] = useState<JarvisSuggestedAction | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [voiceAvailability, setVoiceAvailability] = useState<VoiceAvailability>("checking");
+  const [voiceAvailability, setVoiceAvailability] = useState<VoicePermissionState>("not-requested");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [psm, setPsm] = useState<PsmState>(() => emptyPsmState(storage));
   const [psmError, setPsmError] = useState("");
   const [history, setHistory] = useState<JarvisHistoryItem[]>([]);
   const [draftText, setDraftText] = useState("");
-  const [assistantName, setAssistantName] = useState("JARVIS");
+  const [assistantName, setAssistantNameState] = useState("JARVIS");
   const [appearance, setAppearance] = useState<JarvisAppearance>({ grid: true, glow: true, compact: false, animation: "standard", hudIntensity: "standard" });
 
   const refreshPsm = useCallback(async () => {
@@ -136,9 +137,52 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
     return () => { active = false; };
   }, [storage]);
 
+  useEffect(() => {
+    let active = true;
+    fetch("/api/user-settings", { cache: "no-store" }).then(async (response) => ({ response, body: await response.json().catch(() => ({})) })).then(({ response, body }) => {
+      if (!active || !response.ok) return;
+      const preferences = body.preferences as { assistantName?: string; appearance?: JarvisAppearance } | null;
+      if (preferences?.assistantName) setAssistantNameState(preferences.assistantName);
+      if (preferences?.appearance) setAppearance((current) => ({ ...current, ...preferences.appearance }));
+      if (Array.isArray(body.history)) setHistory(body.history.slice(0, 20));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
   const data = useMemo(() => adaptJarvisData({ accounts, skus, periods, imports, actions, reviews, psm, storage, currentAccountId, currentPeriodId }), [accounts, skus, periods, imports, actions, reviews, psm, storage, currentAccountId, currentPeriodId]);
   const briefing = useMemo(() => data.currentAccount ? buildAccountBriefing(data, data.currentAccount.id) : buildPortfolioBriefing(data), [data]);
   const demoDataWarning = data.demoData ? "Demo data is active. Findings are sample-only, read-only, and not proof of production account state." : "";
+
+  const recommendationFromAction = useCallback((action: JarvisSuggestedAction): AuditRecommendation => {
+    if (action.originalRecommendation) return {
+      ...action.originalRecommendation,
+      proposedAction: String(action.proposedFields?.proposedAction || action.originalRecommendation.proposedAction),
+    };
+    const entity = action.type === "escalate_blocker" ? "blocker" : "task";
+    const recommendationId = action.recommendationId || `command-recommendation:${action.id}`;
+    return {
+      id: recommendationId,
+      findingId: `command-finding:${action.id}`,
+      accountId: action.accountId || "",
+      actionType: action.type,
+      proposedAction: action.label,
+      proposedPayload: { entity, record: { accountId: action.accountId, ...action.proposedFields }, evidence: action.evidence },
+      approvalRequired: true,
+      requiredRole: action.requiredRole || "psm",
+      executionCapability: action.executionCapability || "garden_psm_write",
+      riskLevel: action.type === "escalate_blocker" ? "medium" : "low",
+      status: "proposed",
+    };
+  }, []);
+
+  const persistProposal = useCallback(async (action: JarvisSuggestedAction) => {
+    if (!storage.writable || !psm.storage.writable || !action.accountId) return action;
+    const recommendation = recommendationFromAction(action);
+    const response = await fetch("/api/recommendations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "propose", recommendation }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "The proposal could not be recorded in audit history.");
+    return { ...action, recommendationId: body.recommendation?.id || recommendation.id };
+  }, [psm.storage.writable, recommendationFromAction, storage.writable]);
 
   const runCommand = useCallback(async (command = commandText) => {
     const nextCommand = command.trim();
@@ -152,10 +196,16 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
     setLastResponse(result.response);
     setEvidence(result.evidence);
     setSuggestedActions(result.suggestedActions);
-    setPendingApproval(result.requiresApproval ? result.suggestedActions.find((action) => action.requiresApproval) || null : null);
+    let approval = result.requiresApproval ? result.suggestedActions.find((action) => action.requiresApproval) || null : null;
+    if (approval && storage.writable && psm.storage.writable) {
+      try { approval = await persistProposal(approval); }
+      catch (reason) { setPsmError(reason instanceof Error ? reason.message : "The proposal audit record could not be saved."); }
+    }
+    setPendingApproval(approval);
     setDraftText(result.draft || "");
     setCommandText("");
     setHistory((current) => [{ id: `history-${Date.now()}`, command: nextCommand, response: result.response, intent: result.intent, timestamp: new Date().toISOString() }, ...current].slice(0, 20));
+    if (storage.writable) void fetch("/api/user-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "history", accountId: data.currentAccount?.id, command: nextCommand, response: result.response, intent: result.intent }) }).catch(() => undefined);
     if (result.intent === "OPEN_SETTINGS") setSettingsOpen(true);
     if (result.navigation) {
       setMode("navigating");
@@ -163,11 +213,12 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
     }
     setMode(result.error ? "needsAttention" : result.draft ? "draftReady" : result.evidence.length ? "briefing" : "idle");
     return result;
-  }, [commandText, data, onNavigate]);
+  }, [commandText, data, onNavigate, persistProposal, psm.storage.writable, storage.writable]);
 
-  const chooseSuggestedAction = useCallback((action: JarvisSuggestedAction) => {
+  const chooseSuggestedAction = useCallback(async (action: JarvisSuggestedAction) => {
     if (action.requiresApproval) {
-      setPendingApproval(action);
+      try { setPendingApproval(await persistProposal(action)); }
+      catch (reason) { setPendingApproval(action); setPsmError(reason instanceof Error ? reason.message : "The proposal audit record could not be saved."); }
       setOpen(true);
       setMode("needsAttention");
       return;
@@ -177,11 +228,18 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
     else if (action.type === "start_weekly_review") onNavigate({ view: "review", accountId: action.accountId });
     else if (action.type === "open_account") onNavigate({ view: "accounts", accountId: action.accountId });
     else if (action.type === "draft_partner_update") setOpen(true);
-  }, [currentAccountId, onNavigate]);
+  }, [currentAccountId, onNavigate, persistProposal]);
 
-  const updatePendingApproval = useCallback((fields: Record<string, string | boolean>) => {
-    setPendingApproval((current) => current ? { ...current, proposedFields: fields } : current);
-  }, []);
+  const updatePendingApproval = useCallback(async (fields: Record<string, string | boolean>) => {
+    if (!pendingApproval) return;
+    const updated = { ...pendingApproval, proposedFields: fields };
+    setPendingApproval(updated);
+    if (!updated.recommendationId) return;
+    const recommendation = recommendationFromAction(updated);
+    const response = await fetch("/api/recommendations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "edit", recommendationId: updated.recommendationId, proposedPayload: recommendation.proposedPayload, proposedAction: recommendation.proposedAction }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "The edited proposal could not be recorded.");
+  }, [pendingApproval, recommendationFromAction]);
 
   const approvePendingAction = useCallback(async () => {
     if (!pendingApproval) return;
@@ -195,15 +253,15 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
       setLastResponse("Central storage is read-only or unavailable. The proposal remains unsaved.");
       return;
     }
-    const entity = pendingApproval.type === "escalate_blocker" ? "blocker" : "task";
-    const record = { accountId: pendingApproval.accountId, ...pendingApproval.proposedFields };
     setMode("thinking");
     try {
-      const response = await fetch("/api/psm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ entity, record }) });
+      const recorded = pendingApproval.recommendationId ? pendingApproval : await persistProposal(pendingApproval);
+      if (!recorded.recommendationId) throw new Error("The proposal could not be recorded before approval.");
+      const response = await fetch("/api/recommendations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "approve", recommendationId: recorded.recommendationId }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.ok) throw new Error(body.error || "The approved action could not be saved.");
       await refreshPsm();
-      setLastResponse(`${pendingApproval.label} was approved and saved to Garden. No external message or API action was sent.`);
+      setLastResponse(body.approvedOnly ? `${pendingApproval.label} was approved and recorded. This recommendation has no enabled execution capability, so no operational or external action ran.` : `${pendingApproval.label} was approved, saved to Garden, and confirmed by reading the record back. No external message or API action was sent.`);
       setSuggestedActions((current) => current.filter((action) => action.id !== pendingApproval.id));
       setPendingApproval(null);
       setMode("briefing");
@@ -211,10 +269,25 @@ export function JarvisAssistantProvider({ children, accounts, skus, periods, imp
       setMode("error");
       setLastResponse(reason instanceof Error ? reason.message : "The approved action could not be saved.");
     }
-  }, [pendingApproval, psm.storage.writable, refreshPsm, storage.writable]);
+  }, [pendingApproval, persistProposal, psm.storage.writable, refreshPsm, storage.writable]);
 
-  const updateAppearance = useCallback((updates: Partial<JarvisAppearance>) => setAppearance((current) => ({ ...current, ...updates })), []);
-  const cancelPendingAction = useCallback(() => { setPendingApproval(null); setLastResponse("Proposal canceled. No Garden data was changed."); setMode("idle"); }, []);
+  const savePreferences = useCallback((nextName: string, nextAppearance: JarvisAppearance) => {
+    if (!storage.writable) return;
+    void fetch("/api/user-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "preferences", preferences: { assistantName: nextName, appearance: nextAppearance } }) }).catch(() => undefined);
+  }, [storage.writable]);
+  const updateAppearance = useCallback((updates: Partial<JarvisAppearance>) => setAppearance((current) => { const next = { ...current, ...updates }; savePreferences(assistantName, next); return next; }), [assistantName, savePreferences]);
+  const setAssistantName = useCallback((name: string) => { const next = name || "JARVIS"; setAssistantNameState(next); savePreferences(next, appearance); }, [appearance, savePreferences]);
+  const cancelPendingAction = useCallback(async () => {
+    const current = pendingApproval;
+    setPendingApproval(null);
+    setLastResponse("Proposal canceled. No Garden operational data was changed.");
+    setMode("idle");
+    if (!current?.recommendationId) return;
+    try {
+      const response = await fetch("/api/recommendations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "cancel", recommendationId: current.recommendationId }) });
+      if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || "Cancellation audit event could not be saved."); }
+    } catch (reason) { setPsmError(reason instanceof Error ? reason.message : "Cancellation audit event could not be saved."); }
+  }, [pendingApproval]);
   const reportError = useCallback((message: string) => { setLastResponse(message); setMode("error"); setOpen(true); }, []);
 
   const value: JarvisAssistantContextValue = {

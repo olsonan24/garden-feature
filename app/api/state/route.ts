@@ -1,4 +1,4 @@
-import { hasConfiguredWriteAuth, isAuthorizedRequest, isAuthorizedWriteRequest } from "../../../lib/jarvis-auth";
+import { authorizeRequest, canAccessAccount, hasConfiguredWriteAuth, isAuthorizedRequest, isAuthorizedWriteRequest, publicPrincipal } from "../../../lib/jarvis-auth";
 import { accountsSeed, actionSeed, importSeed, seedPeriod, seedSkus } from "../../../lib/jarvis-seed";
 import { ensurePersistentSchema, getPersistentDatabase, storageLabel } from "../../../lib/persistent-database";
 
@@ -9,6 +9,22 @@ function parsePayload<T>(value: unknown): T | null {
   catch { return null; }
 }
 
+export function demoDataEnabled(env: { NODE_ENV?: string; ENABLE_DEMO_DATA?: string } = process.env) {
+  return env.NODE_ENV !== "production" && env.ENABLE_DEMO_DATA === "true";
+}
+
+function emptyState(detail: string) {
+  return {
+    accounts: [],
+    skus: [],
+    imports: [],
+    actions: [],
+    periods: [],
+    reviews: [],
+    storage: { mode: "unavailable", writable: false, label: "No central data source", detail },
+  };
+}
+
 function demoState() {
   return {
     accounts: accountsSeed,
@@ -17,7 +33,7 @@ function demoState() {
     actions: actionSeed,
     periods: [seedPeriod],
     reviews: [],
-    storage: { mode: "demo", writable: false, label: "Demo data", detail: "Sample Caldwell data is shown. Changes are not saved centrally." },
+    storage: { mode: "demo", writable: false, label: "Development demo data", detail: "Explicit ENABLE_DEMO_DATA development mode is active. Sample Caldwell records are read-only and never production evidence." },
   };
 }
 
@@ -25,7 +41,12 @@ export async function GET(request: Request) {
   if (!(await isAuthorizedRequest(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const db = await getPersistentDatabase();
-    if (!db) return Response.json(demoState(), { headers: { "cache-control": "no-store", "x-jarvis-storage": "demo" } });
+    const access = await authorizeRequest(request, "read");
+    if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+    if (!db) {
+      const state = demoDataEnabled() ? demoState() : emptyState("DATABASE_URL or a Cloudflare D1 binding is required. Demo data is disabled by default and cannot run in production.");
+      return Response.json({ ...state, principal: publicPrincipal(access.principal) }, { status: demoDataEnabled() ? 200 : 503, headers: { "cache-control": "no-store", "x-jarvis-storage": state.storage.mode } });
+    }
     await ensurePersistentSchema(db);
     const [accounts, skus, imports, actions, periods, reviews] = await Promise.all([
       db.all("SELECT id, name, status FROM accounts ORDER BY created_at"),
@@ -37,17 +58,21 @@ export async function GET(request: Request) {
     ]);
     const payloads = <T>(rows: Record<string, unknown>[]) => rows.map((row) => parsePayload<T>(row.payload)).filter((item): item is T => Boolean(item));
     const writable = await hasConfiguredWriteAuth();
+    const allowedAccountIds = new Set((accounts as Array<{ id: string }>).filter((account) => canAccessAccount(access.principal, account.id)).map((account) => account.id));
+    const filterAccount = <T extends { accountId: string }>(items: T[]) => items.filter((item) => allowedAccountIds.has(item.accountId));
     return Response.json({
-      accounts,
-      skus: payloads(skus),
-      imports,
-      actions: payloads(actions),
-      periods: payloads(periods),
-      reviews: payloads(reviews),
+      accounts: (accounts as Array<{ id: string }>).filter((account) => allowedAccountIds.has(account.id)),
+      skus: filterAccount(payloads<{ accountId: string }>(skus)),
+      imports: filterAccount(imports as Array<{ accountId: string }>),
+      actions: filterAccount(payloads<{ accountId: string }>(actions)),
+      periods: filterAccount(payloads<{ accountId: string }>(periods)),
+      reviews: filterAccount(payloads<{ accountId: string }>(reviews)),
+      principal: publicPrincipal(access.principal),
       storage: { mode: db.kind, writable, label: storageLabel(db.kind), detail: writable ? "Shared dashboard data is saved centrally." : "Set JARVIS_PASSCODE before enabling production writes." },
     }, { headers: { "cache-control": "no-store", "x-jarvis-storage": db.kind } });
   } catch (error) {
-    return Response.json({ ...demoState(), storage: { mode: "unavailable", writable: false, label: "Storage unavailable", detail: "The central database could not be reached. Sample data is labeled read-only." }, error: error instanceof Error ? error.message : "Storage failed" }, { status: 503, headers: { "cache-control": "no-store", "x-jarvis-storage": "unavailable" } });
+    const state = emptyState("The central database could not be reached. No substitute account or metric data has been loaded.");
+    return Response.json({ ...state, error: error instanceof Error ? error.message : "Storage failed" }, { status: 503, headers: { "cache-control": "no-store", "x-jarvis-storage": "unavailable" } });
   }
 }
 
@@ -59,6 +84,9 @@ export async function POST(request: Request) {
     if (!db) return Response.json({ error: "Central storage is not configured. No changes were saved." }, { status: 503 });
     await ensurePersistentSchema(db);
     const kind = String(payload.kind ?? "");
+    const accountIdForAccess = String(payload.accountId || payload.id || "").trim();
+    const access = await authorizeRequest(request, kind === "account" ? "admin" : "write_psm", kind === "account" ? undefined : accountIdForAccess);
+    if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
     if (kind === "account") {
       const id = String(payload.id || "").trim(), name = String(payload.name || "").trim();
       if (!id || !name) return Response.json({ error: "Account id and name are required." }, { status: 400 });

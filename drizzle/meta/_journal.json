@@ -29,6 +29,13 @@
       "when": 1786021135392,
       "tag": "0003_tan_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786042566642,
+      "tag": "0004_handy_silver_surfer",
+      "breakpoints": true
     }
   ]
 }

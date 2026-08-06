@@ -1,4 +1,5 @@
 import type { DashboardSku, PeriodPayload, Status } from "./analyze-reports";
+import type { AuditRecommendation } from "./audit/shared/audit-recommendation";
 import type {
   AccountEvent,
   AccountWorkflow,
@@ -69,7 +70,8 @@ export type JarvisSuggestedActionType =
   | "start_weekly_review"
   | "draft_partner_update"
   | "open_import_center"
-  | "open_account";
+  | "open_account"
+  | "audit_recommendation";
 
 export type JarvisSuggestedAction = {
   id: string;
@@ -81,6 +83,10 @@ export type JarvisSuggestedAction = {
   evidence: JarvisEvidenceItem[];
   proposedFields?: Record<string, string | boolean>;
   requiresApproval: boolean;
+  requiredRole?: "psm" | "manager" | "administrator";
+  executionCapability?: "garden_psm_write" | "gmail_draft" | "gmail_send" | "slack_post" | "not_executable";
+  recommendationId?: string;
+  originalRecommendation?: AuditRecommendation;
 };
 
 export type JarvisCommandResult = {
@@ -182,4 +188,3 @@ export type JarvisAccountMatch =
   | { status: "matched"; account: JarvisAccountData; score: number }
   | { status: "multiple"; accounts: JarvisAccountData[]; score: number }
   | { status: "not_found"; score: number };
-

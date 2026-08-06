@@ -2,22 +2,42 @@
 
 import { Bot, BrainCircuit, Check, ChevronDown, Database, Gauge, Image as ImageIcon, KeyRound, Mic, Palette, Plug, RefreshCw, ShieldCheck, TerminalSquare, X } from "lucide-react";
 import { useJarvisAssistant } from "./jarvis-assistant-provider";
+import { useEffect, useState } from "react";
+import type { IntegrationStatus } from "../lib/integrations/types";
 
-type SettingStatus = "Working" | "Disabled" | "Planned" | "Admin only" | "Not connected" | "Requires admin setup";
+type SettingStatus = "Working" | "Disabled" | "Planned" | "Admin only" | "Not connected" | "Not configured" | "Expired token" | "Error";
 
 function Status({ children }: { children: SettingStatus }) { return <span className={`angora-jarvis-setting-status angora-jarvis-setting-status--${children.toLowerCase().replace(/\s+/g, "-")}`}>{children}</span>; }
 function Row({ label, detail, status }: { label: string; detail?: string; status: SettingStatus }) { return <div className="angora-jarvis-setting-row"><div><b>{label}</b>{detail && <small>{detail}</small>}</div><Status>{status}</Status></div>; }
 function Section({ icon, title, children, open = false }: { icon: React.ReactNode; title: string; children: React.ReactNode; open?: boolean }) { return <details className="angora-jarvis-setting-section" open={open}><summary>{icon}<span>{title}</span><ChevronDown /></summary><div>{children}</div></details>; }
 function Toggle({ label, checked, onChange, detail }: { label: string; checked: boolean; onChange: (checked: boolean) => void; detail: string }) { return <label className="angora-jarvis-setting-toggle"><span><b>{label}</b><small>{detail}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i aria-hidden="true" /></label>; }
 
-const connections = ["Amazon Seller Central", "Amazon Ads", "Shopify", "Meta Ads", "Google Drive", "QuickBooks", "Slack", "Monday.com"];
 const commands = ["Account navigation", "Account analysis", "Mission queue", "Blockers and overdue work", "Missing reports", "Weekly update draft", "Task proposal", "Blocker escalation proposal"];
+
+function integrationSettingStatus(status?: IntegrationStatus): SettingStatus {
+  if (!status || status.state === "not-configured") return "Not configured";
+  if (status.state === "connected") return "Working";
+  if (status.state === "expired-token") return "Expired token";
+  if (status.state === "disconnected") return "Not connected";
+  return "Error";
+}
 
 export function JarvisSettingsDrawer() {
   const {
     settingsOpen, setSettingsOpen, appearance, updateAppearance, assistantName, setAssistantName,
     voiceAvailability, voiceEnabled, setVoiceEnabled, history, data, briefing, demoDataWarning, psmError, refreshPsm,
   } = useJarvisAssistant();
+  const [connections, setConnections] = useState<{ gmail?: IntegrationStatus; slack?: IntegrationStatus }>({});
+  const [aiStatus, setAiStatus] = useState<{ state: string; detail: string }>({ state: "checking", detail: "Checking server configuration." });
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let active = true;
+    Promise.all([
+      fetch("/api/integrations/status", { cache: "no-store" }).then((response) => response.json()),
+      fetch("/api/ai/status", { cache: "no-store" }).then((response) => response.json()),
+    ]).then(([integrationBody, aiBody]) => { if (active) { setConnections(integrationBody); setAiStatus(aiBody); } }).catch(() => { if (active) setAiStatus({ state: "error", detail: "Configuration status could not be loaded." }); });
+    return () => { active = false; };
+  }, [settingsOpen]);
   if (!settingsOpen) return null;
 
   return <aside className="angora-jarvis-settings" role="dialog" aria-label="JARVIS settings" aria-modal="false">
@@ -25,7 +45,7 @@ export function JarvisSettingsDrawer() {
     <div className="angora-jarvis-settings-scroll">
       <Section icon={<BrainCircuit />} title="AI Brain" open>
         <Row label="Deterministic command engine" detail="Typed and voice commands use the same local intent router." status="Working" />
-        <Row label="Server AI provider" detail="No provider status endpoint is configured in this phase." status="Not connected" />
+        <Row label="Server AI provider" detail={aiStatus.detail} status={aiStatus.state === "not-configured" ? "Not configured" : aiStatus.state === "configured-not-verified" ? "Not connected" : aiStatus.state === "error" ? "Error" : "Working"} />
         <Row label="Safe mode" detail="Unsupported commands fail closed." status="Working" />
         <Row label="Evidence required" detail="Recommendations show their Garden source records." status="Working" />
         <Row label="Approval required" detail="Data changes are held as proposals until approval." status="Working" />
@@ -41,7 +61,9 @@ export function JarvisSettingsDrawer() {
       </Section>
 
       <Section icon={<Plug />} title="Connections">
-        {connections.map((connection) => <Row key={connection} label={connection} detail="No client-side credential or connector is present." status={connection === "Monday.com" || connection === "Slack" ? "Planned" : "Requires admin setup"} />)}
+        <Row label="Gmail" detail={connections.gmail?.detail || "Server connection status has not been checked."} status={integrationSettingStatus(connections.gmail)} />
+        <Row label="Slack" detail={connections.slack?.detail || "Server connection status has not been checked."} status={integrationSettingStatus(connections.slack)} />
+        <Row label="Automatic sending or posting" detail="Disabled. Every external action requires an approved recommendation and server authorization." status="Disabled" />
       </Section>
 
       <Section icon={<TerminalSquare />} title="Commands">
@@ -52,13 +74,13 @@ export function JarvisSettingsDrawer() {
       <Section icon={<Database />} title="Memory">
         <Row label="Account history" detail={`${data.currentAccount?.events.length || 0} saved event${data.currentAccount?.events.length === 1 ? "" : "s"} in current context.`} status="Working" />
         <Row label="Weekly review memory" detail={`${data.currentAccount?.weeklyReviews.length || 0} saved PSM review${data.currentAccount?.weeklyReviews.length === 1 ? "" : "s"}.`} status="Working" />
-        <Row label="Decision history" detail="Approval audit records are not a dedicated data type yet." status="Planned" />
-        <Row label="Cross-session assistant chat" detail="Command history is session-only in Phase 1." status="Planned" />
+        <Row label="Decision history" detail="Proposals, edits, approvals, cancellations, executions, and failures use immutable audit events." status="Working" />
+        <Row label="Cross-session command history" detail="Authenticated command history and appearance preferences are stored centrally when storage is configured." status={data.storage.writable ? "Working" : "Disabled"} />
       </Section>
 
       <Section icon={<Mic />} title="Voice">
         <Toggle label="Push-to-talk" detail="Never listens in the background" checked={voiceEnabled} onChange={setVoiceEnabled} />
-        <Row label="Browser speech recognition" detail={voiceAvailability === "available" ? "Supported by this browser." : voiceAvailability === "checking" ? "Checking browser support." : "Unavailable; typed commands remain enabled."} status={voiceAvailability === "available" ? "Working" : "Disabled"} />
+        <Row label="Microphone permission" detail={`Current state: ${voiceAvailability.replace(/-/g, " ")}. Permission is requested only from the Enable Microphone action.`} status={["granted", "listening", "processing", "stopped"].includes(voiceAvailability) ? "Working" : "Disabled"} />
         <Row label="Always-on listening" detail="Intentionally excluded from this phase." status="Disabled" />
         <Row label="Desktop wake word" status="Planned" />
       </Section>
@@ -90,6 +112,6 @@ export function JarvisSettingsDrawer() {
         {psmError && <div className="angora-jarvis-security-warning"><KeyRound /><p><b>PSM context limitation</b>{psmError}</p></div>}
       </Section>
     </div>
-    <footer><Check />Phase 1 safe command layer · no external execution</footer>
+    <footer><Check />Guarded execution · evidence, approval, and audit history required</footer>
   </aside>;
 }

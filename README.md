@@ -15,41 +15,47 @@ The repository is configured as a native Next.js project. Import it into Vercel
 and keep the framework preset on **Next.js**. `vercel.json` pins the install and
 build commands used by Git deployments.
 
-No environment variables are required for the seeded demonstration dashboard.
-To protect the deployed dashboard with its passcode screen, add this variable
-to the Production, Preview, and Development environments:
+Production and preview deployments require central storage to display account
+data. Missing storage returns an explicit unavailable state; production never
+substitutes the bundled Caldwell fixture. Development demo data is disabled by
+default and can be enabled only with `ENABLE_DEMO_DATA=true` outside production.
+
+Configure multi-user authentication with server-only `JARVIS_USERS_JSON` and a
+separate signing secret. `JARVIS_PASSCODE` remains a single-administrator
+compatibility option:
 
 ```text
-JARVIS_PASSCODE=your-private-passcode
+JARVIS_SESSION_SECRET=long-random-signing-secret
+JARVIS_USERS_JSON=[{"userId":"...","name":"...","role":"psm","accountIds":["..."],"passcode":"..."}]
 ```
 
-When neither a passcode nor central database is configured, the deployment
-opens directly in labeled, read-only demo mode. Production mutation routes
-require both a configured passcode and an authenticated session.
+Roles are `psm`, `manager`, `administrator`, and `read-only`; capability and
+account assignment checks run in every protected server route. With no auth
+configuration production is read-only, but it still does not receive demo data.
 
 Phase 1 shared data supports either existing Cloudflare D1 bindings or a Neon
 Postgres database on Vercel. For Vercel, connect Neon through the Marketplace
 and expose its server-only connection string as `DATABASE_URL`. The runtime
-creates the existing dashboard and Phase 1 tables idempotently; the checked-in
-Drizzle migration is the reviewable D1/SQLite schema history. Teams that apply
-database changes before deployment can run
-`drizzle/postgres/0001_jarvis_phase1.sql` against Neon; the runtime bootstrap
-uses the same idempotent schema.
+creates the dashboard, PSM, raw-report, user-preference, Account State Block,
+and immutable audit tables idempotently. The checked-in Drizzle migrations are
+the reviewable D1/SQLite history. Apply both files under `drizzle/postgres/` to
+Neon in numeric order when migrations are managed outside runtime bootstrap.
 
 ```text
 DATABASE_URL=postgresql://...
-JARVIS_PASSCODE=your-private-passcode
+JARVIS_SESSION_SECRET=...
+JARVIS_USERS_JSON=...
 ```
 
-Without `DATABASE_URL`, Vercel serves the bundled Caldwell sample with visible
-"Demo data" and "not synced" indicators. It does not pretend that edits were
-saved. With Postgres but without `JARVIS_PASSCODE`, shared records remain
-readable but writes stay disabled.
+Without `DATABASE_URL`, Vercel returns no accounts and an explicit central-
+storage error. With Postgres but without a write-capable configured user,
+shared records remain readable but writes stay disabled.
 
-Parsed report summaries, calculated periods, and SKU data persist in the
-database. Original uploaded files are additionally retained only when the
-Cloudflare `BUCKET` binding is available; Vercel/Neon deployments clearly state
-that original-file retention is not configured rather than claiming otherwise.
+Every authenticated import stores the original bytes, checksum, filename,
+size, uploader, parser version, and lifecycle status in central storage before
+parsing. An optional Cloudflare bucket copy can supplement, but never replace,
+that database-backed original. Normalized rows preserve raw-import, report,
+sheet/row, parser-version, and import-time lineage.
 
 ## Phase 1 PSM operating layer
 
@@ -64,9 +70,10 @@ that original-file retention is not configured rather than claiming otherwise.
 - Waiting or blocked tasks require a reason; resolved blockers require
   resolution notes; failed mutations leave the client state unchanged.
 
-The application currently uses one shared passcode/session boundary. It does
-not yet provide per-user roles, row-level security, or a partner portal; those
-remain explicit future security/product work.
+The application supports signed per-user sessions, account assignments, and
+server-side role capabilities. Database-native row-level security and a partner
+portal are not implemented; route authorization is therefore a required part
+of every data access path.
 
 ## JARVIS command layer
 
@@ -82,18 +89,25 @@ escalation proposals, settings, and help. Account commands fuzzy-match real
 Garden accounts and navigate to the existing account view rather than a
 separate JARVIS-only account screen.
 
-All recommendations include source evidence when the corresponding Garden
-record exists. Task and blocker mutations are presented as editable approval
-cards and use the existing protected `/api/psm` save path only after approval.
-Read-only or unavailable storage produces a real error and retains the proposal
-without showing a success state. No external connector, message send, API key,
-camera, screen, file-system, browser-control, or desktop-control capability is
-included.
+Every financial or operational finding includes evidence and every action card
+requires approval. Proposals, edits, approvals, cancellations, rejections,
+executions, failures, and rollback requests create audit events. Canonical
+Garden writes still use `/api/psm`; successful execution must be read back from
+the database before the UI receives confirmation. Command history, appearance,
+saved views, and acknowledged alerts are stored per authenticated user.
 
-Voice is optional browser push-to-talk. The microphone is not requested until
-the user clicks it, and typed commands remain available when browser speech
-recognition is unsupported or permission is denied. Command history and
-appearance settings are session-only in this phase.
+Voice is optional browser push-to-talk. `getUserMedia` is called only by the
+explicit **Enable Microphone** click, tracks are released after permission is
+confirmed, and speech recognition starts only after the granted state. Typed
+commands remain available in denied, insecure, unavailable, and unsupported
+states.
+
+Gmail and Slack are the only integration boundaries exposed. Tokens stay in
+server environment variables, status is verified against each provider, reads
+include source references, and sends/posts require an approved matching
+recommendation plus a manager-capable session. No AI provider adapter is active
+until an approved server-side implementation is configured; deterministic
+commands and audits remain available without one.
 
 ## Local development
 
@@ -113,11 +127,15 @@ Open [http://localhost:3000](http://localhost:3000).
 - `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
 - `app/` contains the dashboard and Next.js route handlers
 - `lib/` contains report parsing, analysis, authentication, and runtime adapters
-- `tests/` contains rendered-page and report-analysis checks
+- `tests/` contains rendered-page, report-analysis, audit, persistence, role,
+  voice, Gmail/Slack-boundary, and AI-evidence checks
 - `app/api/psm/route.ts` provides validated Phase 1 PSM reads and mutations
 - `lib/persistent-database.ts` selects D1 or lazy Neon/Postgres storage
-- `drizzle/0003_tan_sphinx.sql` adds the Phase 1 PSM schema
-- `drizzle/postgres/0001_jarvis_phase1.sql` bootstraps the equivalent Neon schema
+- `drizzle/0004_handy_silver_surfer.sql` adds user, raw-report, Account State,
+  audit-history, recommendation, evidence, event, and integration tables
+- `drizzle/postgres/0002_jarvis_audit_intelligence.sql` adds the equivalent Neon schema
+- `docs/data-architecture.md` records canonical sources, permissions, lineage,
+  deployment requirements, and manual verification
 - `vercel.json` declares the native Vercel build configuration
 - `.openai/hosting.json`, `vite.config.ts`, and `worker/` retain optional Sites compatibility
 

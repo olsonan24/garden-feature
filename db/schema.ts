@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
@@ -118,3 +118,63 @@ export const accountEvents = sqliteTable("account_events", {
   occurredAt: text("occurred_at").notNull(),
   payload: text("payload").notNull(),
 }, (table) => [index("account_events_account_time_idx").on(table.accountId, table.occurredAt)]);
+
+export const jarvisUsers = sqliteTable("jarvis_users", {
+  id: text("id").primaryKey(), name: text("name").notNull(), email: text("email"), role: text("role").notNull(), payload: text("payload").notNull(), updatedAt: text("updated_at").notNull(),
+});
+
+export const userPreferences = sqliteTable("user_preferences", {
+  userId: text("user_id").primaryKey(), payload: text("payload").notNull(), updatedAt: text("updated_at").notNull(),
+});
+
+export const userCommandHistory = sqliteTable("user_command_history", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull(), accountId: text("account_id"), command: text("command").notNull(), intent: text("intent").notNull(), response: text("response").notNull(), createdAt: text("created_at").notNull(),
+}, (table) => [index("command_history_user_time_idx").on(table.userId, table.createdAt)]);
+
+export const savedViews = sqliteTable("saved_views", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull(), name: text("name").notNull(), payload: text("payload").notNull(), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull(),
+});
+
+export const acknowledgedAlerts = sqliteTable("acknowledged_alerts", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull(), accountId: text("account_id").notNull(), alertKey: text("alert_key").notNull(), acknowledgedAt: text("acknowledged_at").notNull(),
+});
+
+export const rawImports = sqliteTable("raw_imports", {
+  id: text("id").primaryKey(), accountId: text("account_id").notNull(), reportType: text("report_type").notNull(), originalFilename: text("original_filename").notNull(), originalStoragePath: text("original_storage_path").notNull(), uploadedBy: text("uploaded_by").notNull(), uploadedAt: text("uploaded_at").notNull(), fileChecksum: text("file_checksum").notNull(), fileSize: text("file_size").notNull(), reportStart: text("report_start"), reportEnd: text("report_end"), parserVersion: text("parser_version").notNull(), importStatus: text("import_status").notNull(), importErrors: text("import_errors").notNull(), payload: text("payload").notNull(),
+});
+
+export const rawReportFiles = sqliteTable("raw_report_files", {
+  rawImportId: text("raw_import_id").primaryKey(), encoding: text("encoding").notNull(), data: text("data").notNull(), createdAt: text("created_at").notNull(),
+});
+
+export const normalizedReportRows = sqliteTable("normalized_report_rows", {
+  id: text("id").primaryKey(), rawImportId: text("raw_import_id").notNull(), accountId: text("account_id").notNull(), periodId: text("period_id").notNull(), reportType: text("report_type").notNull(), sourceRow: text("source_row").notNull(), parserVersion: text("parser_version").notNull(), importedAt: text("imported_at").notNull(), payload: text("payload").notNull(),
+}, (table) => [index("normalized_rows_account_period_idx").on(table.accountId, table.periodId)]);
+
+export const accountStateBlocks = sqliteTable("account_state_blocks", {
+  id: text("id").primaryKey(), accountId: text("account_id").notNull(), revision: integer("revision").notNull(), createdBy: text("created_by").notNull(), createdAt: text("created_at").notNull(), payload: text("payload").notNull(),
+}, (table) => [index("state_blocks_account_revision_idx").on(table.accountId, table.revision)]);
+
+export const auditRuns = sqliteTable("audit_runs", {
+  id: text("id").primaryKey(), accountId: text("account_id"), auditType: text("audit_type").notNull(), auditVersion: text("audit_version").notNull(), playbookVersion: text("playbook_version").notNull(), startedAt: text("started_at").notNull(), completedAt: text("completed_at").notNull(), createdBy: text("created_by").notNull(), status: text("status").notNull(), payload: text("payload").notNull(),
+}, (table) => [index("audit_runs_account_time_idx").on(table.accountId, table.completedAt)]);
+
+export const auditFindings = sqliteTable("audit_findings", {
+  id: text("id").primaryKey(), auditRunId: text("audit_run_id").notNull(), accountId: text("account_id").notNull(), skuId: text("sku_id"), severity: text("severity").notNull(), category: text("category").notNull(), payload: text("payload").notNull(),
+}, (table) => [index("audit_findings_run_idx").on(table.auditRunId)]);
+
+export const auditEvidence = sqliteTable("audit_evidence", {
+  id: text("id").primaryKey(), findingId: text("finding_id").notNull(), rawImportId: text("raw_import_id"), sourceReport: text("source_report").notNull(), sourceRow: text("source_row"), payload: text("payload").notNull(),
+}, (table) => [index("audit_evidence_finding_idx").on(table.findingId)]);
+
+export const auditRecommendations = sqliteTable("audit_recommendations", {
+  id: text("id").primaryKey(), findingId: text("finding_id").notNull(), accountId: text("account_id").notNull(), skuId: text("sku_id"), status: text("status").notNull(), requiredRole: text("required_role").notNull(), executionCapability: text("execution_capability").notNull(), payload: text("payload").notNull(), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull(),
+}, (table) => [index("audit_recommendations_account_status_idx").on(table.accountId, table.status)]);
+
+export const auditEvents = sqliteTable("audit_events", {
+  id: text("id").primaryKey(), recommendationId: text("recommendation_id").notNull(), accountId: text("account_id").notNull(), userId: text("user_id").notNull(), userRole: text("user_role").notNull(), eventType: text("event_type").notNull(), occurredAt: text("occurred_at").notNull(), payload: text("payload").notNull(),
+}, (table) => [index("audit_events_recommendation_time_idx").on(table.recommendationId, table.occurredAt)]);
+
+export const integrationConnections = sqliteTable("integration_connections", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull(), provider: text("provider").notNull(), status: text("status").notNull(), scopes: text("scopes").notNull(), payload: text("payload").notNull(), updatedAt: text("updated_at").notNull(),
+});

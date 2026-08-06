@@ -1,0 +1,6 @@
+{
+  "accountId": "fixture-account",
+  "skuId": "fixture-sku",
+  "current": { "netSales": 120, "profit": -45, "adSpend": 40, "adSales": 0 },
+  "previous": { "netSales": 420, "profit": 90, "adSpend": 20, "adSales": 100 }
+}

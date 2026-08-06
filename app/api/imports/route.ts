@@ -3,6 +3,8 @@ import { identifyReportType, parseAmazonReport, type ReportSummary } from "../..
 import { isAuthorizedWriteRequest } from "../../../lib/jarvis-auth";
 import { getCloudflareRuntime, type R2Bucket } from "../../../lib/cloudflare-runtime";
 import { ensurePersistentSchema, getPersistentDatabase } from "../../../lib/persistent-database";
+import { authorizeRequest } from "../../../lib/jarvis-auth";
+import { finishRawReportImport, preserveRawReport } from "../../../lib/report-storage";
 
 const MAX_REPORT_FILES = 20;
 const MAX_REPORT_BYTES = 20 * 1024 * 1024;
@@ -18,7 +20,7 @@ function isoDate(value: FormDataEntryValue | null) {
 }
 
 function fallbackSummary(filename: string, message: string): ReportSummary {
-  return { type: identifyReportType(filename), filename, products: [], daily: [], candidates: [], placements: [], funnel: [], warnings: [message] };
+  return { type: identifyReportType(filename), filename, products: [], daily: [], candidates: [], placements: [], funnel: [], normalizedRows: [], warnings: [message] };
 }
 
 export async function POST(request: Request) {
@@ -35,18 +37,25 @@ export async function POST(request: Request) {
     const db = await getPersistentDatabase();
     if (!db) return Response.json({ error: "Central report storage is not configured. No files were processed or saved." }, { status: 503 });
     await ensurePersistentSchema(db);
+    const access = await authorizeRequest(request, "import_reports", accountId);
+    if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+    const account = await db.first("SELECT id FROM accounts WHERE id = ?", [accountId]);
+    if (!account) return Response.json({ error: "The selected account does not exist in central storage." }, { status: 404 });
     const runtime = await getCloudflareRuntime<{ BUCKET?: R2Bucket }>();
     const bucket = runtime?.BUCKET;
 
-    const parsedFiles: Array<{ id: string; file: File; bytes: ArrayBuffer; objectKey: string | null; summary: ReportSummary }> = [];
+    const parsedFiles: Array<{ id: string; file: File; bytes: ArrayBuffer; objectKey: string | null; summary: ReportSummary; uploadedAt: string; raw: Awaited<ReturnType<typeof preserveRawReport>>; parseFailed: boolean }> = [];
     for (const file of files) {
       const id = crypto.randomUUID();
       const bytes = await file.arrayBuffer();
       const objectKey = bucket ? `${accountId}/${new Date().toISOString().slice(0, 10)}/${id}-${file.name}` : null;
+      const uploadedAt = new Date().toISOString();
+      const raw = await preserveRawReport(db, { id, accountId, filename: file.name, reportType: identifyReportType(file.name), bytes, uploadedBy: access.principal.userId, uploadedAt, contentType: file.type, objectKey });
       let summary: ReportSummary;
+      let parseFailed = false;
       try { summary = parseAmazonReport(bytes, file.name); }
-      catch (error) { summary = fallbackSummary(file.name, error instanceof Error ? `Parsing error: ${error.message}` : "The report could not be parsed."); }
-      parsedFiles.push({ id, file, bytes, objectKey, summary });
+      catch (error) { parseFailed = true; summary = fallbackSummary(file.name, error instanceof Error ? `Parsing error: ${error.message}` : "The report could not be parsed."); }
+      parsedFiles.push({ id, file, bytes, objectKey, summary, uploadedAt, raw, parseFailed });
     }
 
     const detectedStarts = parsedFiles.map((item) => item.summary.dateMin).filter((value): value is string => Boolean(value)).sort();
@@ -59,13 +68,15 @@ export async function POST(request: Request) {
 
     for (const item of parsedFiles) {
       if (bucket && item.objectKey) await bucket.put(item.objectKey, item.bytes, { httpMetadata: { contentType: item.file.type || "application/octet-stream" } });
-      const receivedAt = new Date().toISOString();
+      const receivedAt = item.uploadedAt;
+      const status = item.parseFailed ? "Parse failed" : item.summary.warnings.length ? "Parsed with warning" : "Parsed";
+      await finishRawReportImport(db, { rawImportId: item.id, accountId, periodId, summary: item.summary, uploadedBy: access.principal.userId, uploadedAt: receivedAt, filename: item.file.name, storagePath: item.raw.originalStoragePath, fileChecksum: item.raw.fileChecksum, fileSize: item.file.size, status, errors: item.summary.warnings });
       await db.batch([
-        { sql: "INSERT INTO imports (id, account_id, report_type, filename, period, received_at, status, object_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, report_type = excluded.report_type, filename = excluded.filename, period = excluded.period, received_at = excluded.received_at, status = excluded.status, object_key = excluded.object_key", params: [item.id, accountId, item.summary.type, item.file.name, periodLabel, receivedAt, item.summary.warnings.length ? "Parsed with warning" : "Parsed", item.objectKey] },
+        { sql: "INSERT INTO imports (id, account_id, report_type, filename, period, received_at, status, object_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, report_type = excluded.report_type, filename = excluded.filename, period = excluded.period, received_at = excluded.received_at, status = excluded.status, object_key = excluded.object_key", params: [item.id, accountId, item.summary.type, item.file.name, periodLabel, receivedAt, status, item.objectKey] },
         { sql: "DELETE FROM report_summaries WHERE account_id = ? AND period_id = ? AND report_type = ?", params: [accountId, periodId, item.summary.type] },
       ]);
       await db.run("INSERT INTO report_summaries (id, import_id, account_id, period_id, report_type, payload) VALUES (?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), item.id, accountId, periodId, item.summary.type, JSON.stringify(item.summary)]);
-      created.push({ id: item.id, accountId, reportType: item.summary.type, filename: item.file.name, period: periodLabel, receivedAt, status: item.summary.warnings.length ? "Parsed with warning" : "Parsed" });
+      created.push({ id: item.id, accountId, reportType: item.summary.type, filename: item.file.name, period: periodLabel, receivedAt, status, rawPreserved: true, checksum: item.raw.fileChecksum, parserVersion: item.raw.parserVersion });
     }
 
     const [summaryRows, skuRows, previousRow] = await Promise.all([
@@ -94,7 +105,7 @@ export async function POST(request: Request) {
       writes.push({ sql: "INSERT INTO skus (id, account_id, payload) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, payload = excluded.payload", params: [sku.id, accountId, JSON.stringify({ ...sku, ...preserved })] });
     }
     await db.batch(writes);
-    return Response.json({ imports: created, period, originalFilesStored: Boolean(bucket), storageNote: bucket ? "Parsed data and original files were stored." : "Parsed report data was stored centrally; original file retention is not configured." }, { status: 201 });
+    return Response.json({ imports: created, period, originalFilesStored: true, rawStorage: "central-database", objectCopyStored: Boolean(bucket), storageNote: bucket ? "Original bytes were preserved in the central database and copied to object storage." : "Original bytes and parsed data were preserved in the central database." }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Upload failed" }, { status: 503 });
   }

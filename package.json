@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "build:sites": "bash scripts/build-verified.sh",
-    "test": "tsx --test tests/rendered-html.test.mjs tests/unit-economics.test.ts tests/psm-service.test.ts tests/jarvis-command-engine.test.ts",
+    "test": "tsx --test tests/rendered-html.test.mjs tests/unit-economics.test.ts tests/psm-service.test.ts tests/jarvis-command-engine.test.ts tests/audit-intelligence.test.ts tests/security-boundaries.test.ts tests/persistence-hardening.test.ts tests/sqlite-integration.test.ts",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"

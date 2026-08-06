@@ -54,7 +54,7 @@ export function JarvisSuggestedActionCard({ action }: { action: JarvisSuggestedA
   const saving = mode === "thinking";
 
   function saveEdits() {
-    updatePendingApproval(fields);
+    void updatePendingApproval(fields).catch(() => undefined);
     setEditing(false);
   }
 
@@ -66,9 +66,9 @@ export function JarvisSuggestedActionCard({ action }: { action: JarvisSuggestedA
     <footer>
       {editing ? <button type="button" className="angora-jarvis-approve" onClick={saveEdits}><Check />Save edits</button> : <button type="button" className="angora-jarvis-approve" onClick={() => void approvePendingAction()} disabled={saving}><Check />{saving ? "Saving…" : "Approve"}</button>}
       <button type="button" onClick={() => { if (editing) setFields(action.proposedFields || {}); setEditing((current) => !current); }} disabled={saving}>{editing ? <><X />Discard edits</> : "Edit"}</button>
-      <button type="button" onClick={cancelPendingAction} disabled={saving}>Cancel</button>
+      <button type="button" onClick={() => void cancelPendingAction()} disabled={saving}>Cancel</button>
     </footer>
-    <small className="angora-jarvis-safety-note">Approval saves only to Garden. It does not send partner messages or call an external integration.</small>
+    <small className="angora-jarvis-safety-note">{action.executionCapability === "garden_psm_write" || !action.executionCapability ? "Approval saves only to Garden and confirms the record by reading it back." : action.executionCapability === "not_executable" ? "Approval records the decision only; this recommendation has no enabled executor." : "Approval records the decision only. A separate explicit integration action is still required before any send or post."}</small>
   </article>;
 }
 

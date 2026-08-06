@@ -75,6 +75,15 @@ export type FunnelMetric = {
   purchaseShare?: number;
 };
 
+export type NormalizedReportRow = {
+  sourceRowNumber: number;
+  sourceSheet: string;
+  recordType: "product" | "search_term" | "targeting" | "placement" | "funnel" | "unclassified";
+  sku?: string;
+  asin?: string;
+  payload: Record<string, unknown>;
+};
+
 export type ReportSummary = {
   type: ReportType;
   filename: string;
@@ -83,12 +92,14 @@ export type ReportSummary = {
   candidates: Candidate[];
   placements: PlacementMetric[];
   funnel: FunnelMetric[];
+  normalizedRows: NormalizedReportRow[];
   dateMin?: string;
   dateMax?: string;
   warnings: string[];
 };
 
 type Row = Record<string, unknown>;
+type WorkbookRow = { sourceRowNumber: number; sourceSheet: string; values: Row };
 
 const normalize = (value: string) => value.toLowerCase().replace(/^\ufeff/, "").replace(/[^a-z0-9]/g, "");
 
@@ -149,11 +160,11 @@ function inferReportType(filename: string, rows: Row[]): ReportType {
 
 function workbookRows(bytes: ArrayBuffer) {
   const workbook = XLSX.read(bytes, { type: "array", cellDates: true, raw: false });
-  const rows: Row[] = [];
+  const rows: WorkbookRow[] = [];
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const values = XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: false });
-    for (const value of values) rows.push(normalizedRow(value));
+    values.forEach((value, index) => rows.push({ sourceRowNumber: index + 2, sourceSheet: sheetName, values: normalizedRow(value) }));
   }
   return rows;
 }
@@ -184,23 +195,26 @@ function groupProducts(items: ProductPartial[]) {
 }
 
 export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportSummary {
-  const rows = workbookRows(bytes);
+  const sourceRows = workbookRows(bytes);
+  const rows = sourceRows.map((row) => row.values);
   const type = inferReportType(filename, rows);
   const products: ProductPartial[] = [];
   const daily = new Map<string, { date: string; spend: number; sales: number; orders: number; clicks: number }>();
   const candidates: Candidate[] = [];
   const placements = new Map<string, PlacementMetric>();
   const funnel: FunnelMetric[] = [];
+  const normalizedRows: NormalizedReportRow[] = [];
   const dates: string[] = [];
   const warnings: string[] = [];
 
-  for (const row of rows) {
+  for (const sourceRow of sourceRows) {
+    const row = sourceRow.values;
     const identity = productIdentity(row);
     const rowDate = date(read(row, "Date", "Start Date", "Report Date", "Snapshot Date"));
     if (rowDate) dates.push(rowDate);
 
     if (type === "SKU Economics") {
-      products.push({
+      const product: ProductPartial = {
         source: type,
         ...identity,
         sales: number(read(row, "Gross Sales", "Product Sales", "Sales Revenue", "Total Sales", "Ordered Product Sales")),
@@ -214,9 +228,11 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         profit: number(read(row, "Net Proceeds", "Estimated Profit", "Contribution Profit", "Profit")),
         storage: number(read(row, "Storage Fees", "Aged Inventory Surcharge", "Inventory Storage", "Storage Cost")),
         adSpend: number(read(row, "Advertising", "Advertising Cost", "Ad Spend", "Sponsored Ads")),
-      });
+      };
+      products.push(product);
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "product", sku: identity.sku, asin: identity.asin, payload: product });
     } else if (type === "Business Report by Child ASIN") {
-      products.push({
+      const product: ProductPartial = {
         source: type,
         ...identity,
         sessions: number(read(row, "Sessions - Total", "Sessions Total", "Sessions")),
@@ -228,7 +244,9 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         b2bSales: number(read(row, "Ordered Product Sales - B2B")),
         conversion: number(read(row, "Unit Session Percentage", "Unit Session Percentage - B2B", "Conversion Rate")),
         buyBox: number(read(row, "Featured Offer (Buy Box) Percentage", "Buy Box Percentage", "Buy Box")),
-      });
+      };
+      products.push(product);
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "product", sku: identity.sku, asin: identity.asin, payload: product });
     } else if (type === "Advertised Product") {
       const partial = {
         source: type,
@@ -240,13 +258,14 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         impressions: number(read(row, "Impressions")),
       } satisfies ProductPartial;
       products.push(partial);
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "product", sku: identity.sku, asin: identity.asin, payload: partial });
       if (rowDate) {
         const prior = daily.get(rowDate) || { date: rowDate, spend: 0, sales: 0, orders: 0, clicks: 0 };
         prior.spend += partial.adSpend || 0; prior.sales += partial.adSales || 0; prior.orders += partial.adOrders || 0; prior.clicks += partial.clicks || 0;
         daily.set(rowDate, prior);
       }
     } else if (type === "Search Term" || type === "Targeting") {
-      candidates.push({
+      const candidate: Candidate = {
         sku: identity.sku,
         asin: identity.asin,
         campaign: text(read(row, "Campaign Name", "Campaign")),
@@ -256,7 +275,9 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         orders: number(read(row, "7 Day Total Orders (#)", "14 Day Total Orders (#)", "Orders", "Purchases")),
         clicks: number(read(row, "Clicks")),
         bid: number(read(row, "Bid", "Keyword Bid")) || undefined,
-      });
+      };
+      candidates.push(candidate);
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: type === "Search Term" ? "search_term" : "targeting", sku: identity.sku, asin: identity.asin, payload: candidate });
     } else if (type === "Placement") {
       const label = text(read(row, "Placement Classification", "Placement", "Placement Type")) || "Unknown";
       const prior = placements.get(label) || { placement: label, spend: 0, sales: 0, orders: 0, clicks: 0 };
@@ -265,8 +286,9 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
       prior.orders += number(read(row, "7 Day Total Orders (#)", "14 Day Total Orders (#)", "Orders", "Purchases"));
       prior.clicks += number(read(row, "Clicks"));
       placements.set(label, prior);
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "placement", payload: { placement: label, spend: number(read(row, "Spend", "Cost")), sales: number(read(row, "7 Day Total Sales", "14 Day Total Sales", "Attributed Sales", "Sales")), orders: number(read(row, "7 Day Total Orders (#)", "14 Day Total Orders (#)", "Orders", "Purchases")), clicks: number(read(row, "Clicks")) } });
     } else if (type === "Manage FBA Inventory") {
-      products.push({
+      const product: ProductPartial = {
         source: type,
         ...identity,
         inventory: number(read(row, "afn-warehouse-quantity", "AFN Warehouse Quantity", "Warehouse Quantity", "Total Quantity")),
@@ -276,17 +298,25 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
         unsellable: number(read(row, "afn-unsellable-quantity", "AFN Unsellable Quantity", "Unsellable")),
         researching: number(read(row, "afn-researching-quantity", "AFN Researching Quantity", "Researching")),
         inbound: number(read(row, "afn-inbound-working-quantity", "Inbound Working")) + number(read(row, "afn-inbound-shipped-quantity", "Inbound Shipped")) + number(read(row, "afn-inbound-receiving-quantity", "Inbound Receiving")),
-      });
+      };
+      products.push(product);
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "product", sku: identity.sku, asin: identity.asin, payload: product });
     } else if (type === "Search Query Performance" || type === "Search Catalog Performance") {
       const query = text(read(row, "Search Query", "Query", "Search Term", "ASIN"));
-      if (query) funnel.push({
+      if (query) {
+        const funnelRow: FunnelMetric = {
         query,
         volume: number(read(row, "Search Query Volume", "Query Volume", "Search Volume", "Impressions")),
         impressionShare: number(read(row, "ASIN Impression Share", "Impression Share")) || undefined,
         clickShare: number(read(row, "ASIN Click Share", "Click Share")) || undefined,
         cartShare: number(read(row, "ASIN Cart Add Share", "Cart Add Share")) || undefined,
         purchaseShare: number(read(row, "ASIN Purchase Share", "Purchase Share")) || undefined,
-      });
+        };
+        funnel.push(funnelRow);
+        normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "funnel", sku: identity.sku, asin: identity.asin, payload: funnelRow });
+      }
+    } else {
+      normalizedRows.push({ sourceRowNumber: sourceRow.sourceRowNumber, sourceSheet: sourceRow.sourceSheet, recordType: "unclassified", sku: identity.sku, asin: identity.asin, payload: row });
     }
   }
 
@@ -300,6 +330,7 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
     candidates: candidates.filter((item) => item.label).sort((a, b) => b.spend - a.spend).slice(0, 50),
     placements: [...placements.values()],
     funnel: funnel.sort((a, b) => b.volume - a.volume).slice(0, 50),
+    normalizedRows,
     dateMin: dates.sort()[0],
     dateMax: dates.sort().at(-1),
     warnings,
