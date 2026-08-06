@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DashboardMetrics, DashboardSku, PeriodPayload } from "../lib/analyze-reports.ts";
 import { auditPpcGrowthOperator } from "../lib/audit/amazon/ppc-growth-operator/index.ts";
+import { auditBrandDefense } from "../lib/audit/amazon/brand-defense/index.ts";
+import { auditListingDiagnostics, listingDiagnosticsReadiness } from "../lib/audit/amazon/listing-diagnostics/index.ts";
 import { rankPortfolioAttention, scoreAccountAttention } from "../lib/audit/amazon/account-triage/index.ts";
 import { auditSkuPerformance } from "../lib/audit/amazon/sku-performance/index.ts";
 import type { AuditAccountInput } from "../lib/audit/shared/audit-input.ts";
@@ -73,28 +75,41 @@ test("SKU audit calculates supported loss and decline impact and preserves appro
   assert.ok(result.findings.every((finding) => finding.recommendation?.approvalRequired === true));
 });
 
-test("PPC doctrine requires STR and uses row-level STR evidence when available", () => {
+test("PPC doctrine remains available but unsourced operator rules stay blocked", () => {
   const accountId = "ppc-account";
   const product = sku(accountId, "sku-ppc", { sales: 100, netSales: 100, units: 10, inventory: 100 });
   const current = period(accountId, "ppc-period", "2026-08-06", [product]);
   const summary: ReportSummary = { type: "Search Term", filename: "str.csv", products: [], daily: [], candidates: [{ sku: product.sku, campaign: "Campaign 1", label: "waste query", spend: 25, sales: 0, orders: 0, clicks: 12 }], placements: [], funnel: [], normalizedRows: [{ sourceRowNumber: 7, sourceSheet: "Search Term", recordType: "search_term", sku: product.sku, payload: { sku: product.sku, campaign: "Campaign 1", label: "waste query", spend: 25, sales: 0, orders: 0, clicks: 12 } }], warnings: [] };
   const withStr = auditPpcGrowthOperator(input(accountId, [current], [{ rawImportId: "raw-str-1", periodId: current.id, summary }]), "audit-ppc");
   assert.equal(withStr.doctrine.lead, "STR");
-  assert.equal(withStr.findings[0].evidence[0].rawImportId, "raw-str-1");
-  assert.equal(withStr.findings[0].evidence[0].sourceRowReference, "row 7");
-  assert.equal(withStr.findings[0].recommendation?.requiredRole, "manager");
+  assert.equal(withStr.doctrine.sourceStatus, "partial");
+  assert.ok(withStr.doctrine.missingSources.includes("references/str-process.md"));
+  assert.equal(withStr.readiness.status, "blocked");
+  assert.equal(withStr.findings.length, 0);
+  assert.ok(withStr.readiness.issues.some((issue) => issue.code === "missing_ppc_operator_references"));
 
   const withoutStr = auditPpcGrowthOperator(input(accountId, [current], [{ rawImportId: "raw-sqp-1", periodId: current.id, summary: { ...summary, type: "Search Query Performance", normalizedRows: [] } }]), "audit-no-str");
   assert.equal(withoutStr.readiness.status, "blocked");
   assert.equal(withoutStr.findings.length, 0);
-  assert.match(withoutStr.readiness.issues[0].message, /STR proof is missing/);
+  assert.ok(withoutStr.readiness.issues.some((issue) => /STR proof is missing/.test(issue.message)));
+});
+
+test("listing optimizer and brand defense remain explicit scaffolds without source packages", () => {
+  const accountId = "source-scaffold";
+  const sourceInput = input(accountId, [period(accountId, "source-period", "2026-08-06", [sku(accountId, "source-sku", { sessions: 500, conversion: 0.5 })])]);
+  assert.deepEqual(auditListingDiagnostics(sourceInput, "audit-listing"), []);
+  assert.equal(listingDiagnosticsReadiness().status, "blocked");
+  assert.ok(listingDiagnosticsReadiness().issues.some((issue) => issue.code === "listing_optimizer_scaffold_only"));
+  const brand = auditBrandDefense(sourceInput);
+  assert.equal(brand.findings.length, 0);
+  assert.ok(brand.readiness.issues.some((issue) => issue.code === "brand_defense_scaffold_only"));
 });
 
 test("demo data is opt-in development-only and audit versions are explicit", () => {
   assert.equal(demoDataEnabled({ NODE_ENV: "production", ENABLE_DEMO_DATA: "true" }), false);
   assert.equal(demoDataEnabled({ NODE_ENV: "development", ENABLE_DEMO_DATA: "false" }), false);
   assert.equal(demoDataEnabled({ NODE_ENV: "development", ENABLE_DEMO_DATA: "true" }), true);
-  assert.deepEqual(auditRuleVersion("ppcGrowthOperator"), { engine: AUDIT_ENGINE_VERSION, playbook: "1.0.0", parser: PARSER_VERSION });
+  assert.deepEqual(auditRuleVersion("ppcGrowthOperator"), { engine: AUDIT_ENGINE_VERSION, playbook: "0.1.0-partial", parser: PARSER_VERSION });
 });
 
 test("recommendation edit, cancel, and reject transitions are explicit and terminal states cannot change", () => {

@@ -1,6 +1,8 @@
 # Rufus/COSMO-lite diagnostic playbook
 
-Playbook version: `1.0.0`
+Implementation status: **Scaffolded only.** The available source provides the `/rufus-cosmo-lite` title, output description, and download link, but not the skill logic.
+
+Required source: the original `/rufus-cosmo-lite` `.skill` or `.zip` package, including dimension definitions, question-gap logic, attribute rules, inputs, gates, outputs, and tests.
 
 This module boundary is reserved for shopper-intent and catalog-language diagnostics. It must remain separate from PPC proof and listing execution.
 

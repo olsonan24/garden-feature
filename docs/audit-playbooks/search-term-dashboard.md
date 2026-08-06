@@ -1,6 +1,8 @@
 # Search-term dashboard playbook
 
-Playbook version: `1.0.0`
+Implementation status: **Scaffolded only.** The available source provides a title, a one-line description, and a Notion link; the actual `/search-term-dashboard` source package is not present. The rules below are safe interface constraints derived from the supplied top-level PPC doctrine, not a faithful implementation of the Search Term Dashboard skill.
+
+Required source: the exported `/search-term-dashboard` skill package, including all prompt, reference, intent-clustering, calculation, and dashboard files.
 
 ## Purpose
 
@@ -15,4 +17,4 @@ Surface search-term evidence without presenting supporting datasets as proof. Gr
 - Do not infer shopper intent, brand terms, match type, or target from a term string.
 - SQP may explain funnel share; it may not override contradictory STR performance.
 
-Every displayed conclusion must link to evidence with raw import ID, sheet/row, parser version, and period. Filters or sorting never change the historical audit output.
+Every future displayed conclusion must link to evidence with raw import ID, sheet/row, parser version, and period. No skill-specific clustering, scoring, threshold, or dashboard behavior is active.

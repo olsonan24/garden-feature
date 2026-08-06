@@ -1,6 +1,8 @@
 # Brand-defense audit playbook
 
-Playbook version: `1.0.0`
+Implementation status: **Scaffolded only.** The available source provides the `/brand-defense-audit` title, output description, and download link, but not its scoring or campaign-gap logic. The application exposes only a blocked readiness boundary and never infers brand terms.
+
+Required source: the original `/brand-defense-audit` `.skill` or `.zip` package, including PDP scoring, campaign-gap formulas, inputs, thresholds, gates, outputs, and tests.
 
 Brand terms must be explicitly verified and stored in an immutable Account State Block revision. The account name, SKU, ASIN, or campaign name is not sufficient proof of a brand term.
 
