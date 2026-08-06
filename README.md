@@ -23,16 +23,85 @@ to the Production, Preview, and Development environments:
 JARVIS_PASSCODE=your-private-passcode
 ```
 
-When no passcode is configured, the deployment opens directly in demo mode.
-Vercel serves the bundled demonstration data without external storage. D1/R2
-writes remain available only when the app runs in a compatible Cloudflare
-runtime with `DB` and `BUCKET` bindings; write endpoints return a clear `503`
-on a storage-free Vercel demo rather than crashing the deployment.
+When neither a passcode nor central database is configured, the deployment
+opens directly in labeled, read-only demo mode. Production mutation routes
+require both a configured passcode and an authenticated session.
+
+Phase 1 shared data supports either existing Cloudflare D1 bindings or a Neon
+Postgres database on Vercel. For Vercel, connect Neon through the Marketplace
+and expose its server-only connection string as `DATABASE_URL`. The runtime
+creates the existing dashboard and Phase 1 tables idempotently; the checked-in
+Drizzle migration is the reviewable D1/SQLite schema history. Teams that apply
+database changes before deployment can run
+`drizzle/postgres/0001_jarvis_phase1.sql` against Neon; the runtime bootstrap
+uses the same idempotent schema.
+
+```text
+DATABASE_URL=postgresql://...
+JARVIS_PASSCODE=your-private-passcode
+```
+
+Without `DATABASE_URL`, Vercel serves the bundled Caldwell sample with visible
+"Demo data" and "not synced" indicators. It does not pretend that edits were
+saved. With Postgres but without `JARVIS_PASSCODE`, shared records remain
+readable but writes stay disabled.
+
+Parsed report summaries, calculated periods, and SKU data persist in the
+database. Original uploaded files are additionally retained only when the
+Cloudflare `BUCKET` binding is available; Vercel/Neon deployments clearly state
+that original-file retention is not configured rather than claiming otherwise.
+
+## Phase 1 PSM operating layer
+
+- **My Day** summarizes due, overdue, blocked, partner-waiting, missing-data,
+  and unhealthy-account work with compact saved views.
+- **Operations** stores configurable account workflow, tasks, partner requests,
+  blockers, notes, major decisions, and generated account history.
+- **Weekly Business Review** includes guided revenue, ads, inventory, SKU,
+  report, health, blocker, partner, and next-action fields.
+- The weekly partner update is generated as an editable draft and is never sent
+  automatically.
+- Waiting or blocked tasks require a reason; resolved blockers require
+  resolution notes; failed mutations leave the client state unchanged.
+
+The application currently uses one shared passcode/session boundary. It does
+not yet provide per-user roles, row-level security, or a partner portal; those
+remain explicit future security/product work.
+
+## JARVIS command layer
+
+The **JARVIS Command Center** adds a deterministic, evidence-first operator
+layer without replacing or restyling the existing Garden views. A compact
+global assistant remains available on the portfolio, account, import, review,
+and PSM screens.
+
+Supported Phase 1 commands include account navigation and analysis, mission
+queues, blockers, partner requests, overdue tasks, missing reports, editable
+weekly update drafts, weekly-review navigation, task proposals, blocker
+escalation proposals, settings, and help. Account commands fuzzy-match real
+Garden accounts and navigate to the existing account view rather than a
+separate JARVIS-only account screen.
+
+All recommendations include source evidence when the corresponding Garden
+record exists. Task and blocker mutations are presented as editable approval
+cards and use the existing protected `/api/psm` save path only after approval.
+Read-only or unavailable storage produces a real error and retains the proposal
+without showing a success state. No external connector, message send, API key,
+camera, screen, file-system, browser-control, or desktop-control capability is
+included.
+
+Voice is optional browser push-to-talk. The microphone is not requested until
+the user clicks it, and typed commands remain available when browser speech
+recognition is unsupported or permission is denied. Command history and
+appearance settings are session-only in this phase.
 
 ## Local development
 
 ```bash
 npm ci
+npm run lint
+npm test
+npm run build
 npm run dev
 ```
 
@@ -45,6 +114,10 @@ Open [http://localhost:3000](http://localhost:3000).
 - `app/` contains the dashboard and Next.js route handlers
 - `lib/` contains report parsing, analysis, authentication, and runtime adapters
 - `tests/` contains rendered-page and report-analysis checks
+- `app/api/psm/route.ts` provides validated Phase 1 PSM reads and mutations
+- `lib/persistent-database.ts` selects D1 or lazy Neon/Postgres storage
+- `drizzle/0003_tan_sphinx.sql` adds the Phase 1 PSM schema
+- `drizzle/postgres/0001_jarvis_phase1.sql` bootstraps the equivalent Neon schema
 - `vercel.json` declares the native Vercel build configuration
 - `.openai/hosting.json`, `vite.config.ts`, and `worker/` retain optional Sites compatibility
 
@@ -116,6 +189,14 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run build:sites`: build the optional Vinext/Sites artifact on Linux
 - `npm run validate:artifact`: validate an existing Sites artifact
 - `npm run db:generate`: generate Drizzle migrations after schema changes
+
+## Known Import Dependency Risk
+
+The spreadsheet parser currently depends on `xlsx@0.18.5`. Its published npm
+package has unresolved high-severity audit findings and no patched npm release.
+Imports are therefore limited to 20 authenticated files per request and 20 MB
+per file. Replacing the parser is deferred work and should be completed before
+accepting files from untrusted users.
 
 ## Learn More
 

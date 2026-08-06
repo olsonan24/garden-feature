@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
@@ -61,3 +61,60 @@ export const periods = sqliteTable("periods", {
   payload: text("payload").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const accountWorkflows = sqliteTable("account_workflows", {
+  accountId: text("account_id").primaryKey(),
+  stage: text("stage").notNull(),
+  healthStatus: text("health_status").notNull(),
+  payload: text("payload").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const psmTasks = sqliteTable("psm_tasks", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  status: text("status").notNull(),
+  dueDate: text("due_date").notNull(),
+  payload: text("payload").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("psm_tasks_account_due_idx").on(table.accountId, table.dueDate)]);
+
+export const partnerRequests = sqliteTable("partner_requests", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  status: text("status").notNull(),
+  dueDate: text("due_date").notNull(),
+  payload: text("payload").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("partner_requests_account_due_idx").on(table.accountId, table.dueDate)]);
+
+export const psmBlockers = sqliteTable("psm_blockers", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  status: text("status").notNull(),
+  dateOpened: text("date_opened").notNull(),
+  payload: text("payload").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("psm_blockers_account_opened_idx").on(table.accountId, table.dateOpened)]);
+
+export const weeklyReviewsV2 = sqliteTable("weekly_reviews_v2", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  periodId: text("period_id").notNull(),
+  status: text("status").notNull(),
+  weekEnd: text("week_end").notNull(),
+  payload: text("payload").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [index("weekly_reviews_account_week_idx").on(table.accountId, table.weekEnd)]);
+
+export const accountEvents = sqliteTable("account_events", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  eventType: text("event_type").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  payload: text("payload").notNull(),
+}, (table) => [index("account_events_account_time_idx").on(table.accountId, table.occurredAt)]);

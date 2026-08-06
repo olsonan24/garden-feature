@@ -4,13 +4,21 @@ import {
   AlertTriangle, ArrowDownRight, ArrowLeft, ArrowUpRight, BarChart3, Building2, CalendarDays, Check, CheckCircle2,
   ChevronDown, ChevronRight, ClipboardCheck, ExternalLink, FileSpreadsheet,
   FileUp, Gauge, Menu, PackagePlus, Pencil, Plus, Save, Search, Send, Sparkles, Target,
-  RefreshCw, Star, TrendingUp, Upload, Users, X,
+  BrainCircuit, BriefcaseBusiness, Clock3, RefreshCw, Star, TrendingUp, Upload, Users, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { DashboardMetrics, DashboardSku, PeriodPayload, Status } from "../lib/analyze-reports";
+import type { StorageStatus } from "../lib/psm-types";
+import type { GardenView } from "../lib/jarvis-types";
 import { calculateUnitEconomics } from "../lib/unit-economics";
+import { JarvisAssistantProvider } from "./jarvis-assistant-provider";
+import { JarvisCommandCenter } from "./jarvis-command-center";
+import { JarvisGlobalAssistant } from "./jarvis-global-assistant";
+import { JarvisSettingsDrawer } from "./jarvis-settings-drawer";
+import PsmWorkspace, { StorageBanner, WeeklyReviewEditor } from "./psm-workspace";
+import "./jarvis-command-center.css";
 
-type View = "overview" | "accounts" | "imports" | "review";
+type View = GardenView;
 type Account = { id: string; name: string; status: Status };
 type ImportItem = { id: string; accountId: string; reportType: string; filename: string; period: string; receivedAt: string; status: string };
 type ActionItem = { id: string; accountId: string; skuId?: string | null; title: string; detail: string; status: string; createdAt: string; completedAt?: string | null; completedPeriodId?: string | null };
@@ -24,49 +32,6 @@ const money = (value: number) => new Intl.NumberFormat("en-US", { style: "curren
 const integer = (value: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value || 0);
 const pct = (value: number) => value >= 900 ? "No ad sales" : `${(value || 0).toFixed(1)}%`;
 const unique = <T extends { id: string }>(items: T[]) => [...new Map(items.map((item) => [item.id, item])).values()];
-const LOCAL_ECONOMICS_KEY = "jarvis:manual-economics:v1";
-
-type ManualEconomicsValues = Pick<DashboardSku,
-  "manualSalePrice" | "manualReferralRate" | "manualFbaFeePerUnit" |
-  "manualStorageCostPerUnit" | "manualInboundCostPerUnit" | "manualCogsPerUnit" |
-  "manualAngoraRate" | "manualAdSales" | "manualAdSpend"
->;
-
-function manualEconomicsValues(sku: DashboardSku): ManualEconomicsValues {
-  return {
-    manualSalePrice: sku.manualSalePrice,
-    manualReferralRate: sku.manualReferralRate,
-    manualFbaFeePerUnit: sku.manualFbaFeePerUnit,
-    manualStorageCostPerUnit: sku.manualStorageCostPerUnit,
-    manualInboundCostPerUnit: sku.manualInboundCostPerUnit,
-    manualCogsPerUnit: sku.manualCogsPerUnit,
-    manualAngoraRate: sku.manualAngoraRate,
-    manualAdSales: sku.manualAdSales,
-    manualAdSpend: sku.manualAdSpend,
-  };
-}
-
-function readLocalEconomics(): Record<string, ManualEconomicsValues> {
-  try { return JSON.parse(localStorage.getItem(LOCAL_ECONOMICS_KEY) || "{}") as Record<string, ManualEconomicsValues>; }
-  catch { return {}; }
-}
-
-function applyLocalEconomics(skus: DashboardSku[]) {
-  const overrides = readLocalEconomics();
-  return skus.map((sku) => overrides[sku.id] ? { ...sku, ...overrides[sku.id] } : sku);
-}
-
-function setLocalEconomics(sku: DashboardSku, keep: boolean) {
-  try {
-    const overrides = readLocalEconomics();
-    if (keep) overrides[sku.id] = manualEconomicsValues(sku);
-    else delete overrides[sku.id];
-    localStorage.setItem(LOCAL_ECONOMICS_KEY, JSON.stringify(overrides));
-  } catch {
-    // The in-memory update still keeps the current PSM session usable when a
-    // browser blocks storage entirely.
-  }
-}
 
 function previousCompletedWeek() {
   const today = new Date();
@@ -100,16 +65,20 @@ export default function Jarvis() {
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
+  const [storage, setStorage] = useState<StorageStatus>({ mode: "unavailable", writable: false, label: "Checking storage", detail: "Loading the dashboard data source." });
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    fetch("/api/state").then((response) => response.ok ? response.json() : null).then((data) => {
-      if (!data) return;
-      const loadedAccounts = data.accounts || [], loadedSkus = applyLocalEconomics(data.skus || []), loadedPeriods = (data.periods || []).sort((a: PeriodPayload, b: PeriodPayload) => b.endDate.localeCompare(a.endDate));
+    fetch("/api/state", { cache: "no-store" }).then(async (response) => ({ response, data: await response.json() })).then(({ response, data }) => {
+      if (!data?.accounts) throw new Error(data?.error || "The portfolio could not be loaded.");
+      const loadedAccounts = data.accounts || [], loadedSkus = data.skus || [], loadedPeriods = (data.periods || []).sort((a: PeriodPayload, b: PeriodPayload) => b.endDate.localeCompare(a.endDate));
       setAccounts(loadedAccounts); setSkus(loadedSkus); setPeriods(loadedPeriods); setImports(data.imports || []); setActions(data.actions || []); setReviews(data.reviews || []);
+      setStorage(data.storage || { mode: "unavailable", writable: false, label: "Storage unavailable", detail: "The data source did not report its storage mode." });
+      if (!response.ok) setLoadError(data.error || "The central database could not be reached.");
       const firstAccount = loadedAccounts[0]?.id || "";
       const firstPeriod = loadedPeriods.find((period: PeriodPayload) => period.accountId === firstAccount && period.kind === "weekly");
       setAccountId(firstAccount); setPeriodId(firstPeriod?.id || ""); setSkuId("");
-    }).catch(() => {}).finally(() => setLoading(false));
+    }).catch((reason) => setLoadError(reason instanceof Error ? reason.message : "The portfolio could not be loaded.")).finally(() => setLoading(false));
   }, []);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 3500); return () => clearTimeout(timer); }, [toast]);
 
@@ -161,35 +130,51 @@ export default function Jarvis() {
     setPeriodId(value);
     setSkuId("");
   }
-  const post = (body: Record<string, unknown>) => fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const post = async (body: Record<string, unknown>) => {
+    const response = await fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "The change could not be saved.");
+    return result;
+  };
   const go = (next: View) => { setView(next); setMobile(false); };
+  const scrollToTop = () => requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  const openJarvisCommandCenter = () => { go("jarvis"); scrollToTop(); };
+  const navigateFromJarvis = (navigation: { view?: GardenView; accountId?: string }) => {
+    if (navigation.accountId && accounts.some((item) => item.id === navigation.accountId)) changeAccount(navigation.accountId);
+    if (navigation.view) go(navigation.view);
+    scrollToTop();
+  };
 
   async function addAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("name") || "").trim();
     const item: Account = { id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`, name, status: "healthy" };
-    setAccounts((current) => [...current, item]); await post({ kind: "account", ...item }); changeAccount(item.id); setView("accounts"); setModal(null); setToast(`${name} added to JARVIS.`);
+    try { await post({ kind: "account", ...item }); setAccounts((current) => [...current, item]); setAccountId(item.id); setPeriodId(""); setSkuId(""); setView("accounts"); setModal(null); setToast(`${name} added to JARVIS.`); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "The account could not be saved."); }
   }
   async function editAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("name") || "").trim();
     if (!name || !account) return;
     const updated = { ...account, name };
-    setAccounts((current) => current.map((item) => item.id === account.id ? updated : item)); await post({ kind: "account", ...updated }); setModal(null); setToast(`Account renamed to ${name}.`);
+    try { await post({ kind: "account", ...updated }); setAccounts((current) => current.map((item) => item.id === account.id ? updated : item)); setModal(null); setToast(`Account renamed to ${name}.`); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "The account could not be saved."); }
   }
   async function addSku(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("name") || ""), sku = String(form.get("sku") || ""), asin = String(form.get("asin") || ""), listingUrl = String(form.get("listingUrl") || "").trim();
     const item: DashboardSku = { id: `${accountId}-${sku.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`, accountId, name, sku, asin, listingUrl: listingUrl || undefined, sales: 0, netSales: 0, sessions: 0, units: 0, refunds: 0, conversion: 0, adSpend: 0, adSales: 0, adOrders: 0, clicks: 0, profit: 0, storage: 0, cogs: 0, inventory: 0, fulfillable: 0, reserved: 0, transfer: 0, unsellable: 0, inbound: 0, status: "monitor", issue: "No imported history yet.", recommendation: "Include this SKU in the next Monday report package." };
-    setSkus((current) => unique([...current, item])); await post({ kind: "sku", ...item }); setSkuId(item.id); setModal(null); setToast(`${sku} added.`);
+    try { await post({ kind: "sku", ...item }); setSkus((current) => unique([...current, item])); setSkuId(item.id); setModal(null); setToast(`${sku} added.`); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "The SKU could not be saved."); }
   }
   async function addAction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const item: ActionItem = { id: `a-${Date.now()}`, accountId, skuId: String(form.get("skuId") || ""), title: String(form.get("title") || ""), detail: String(form.get("detail") || ""), status: "planned", createdAt: new Date().toISOString() };
-    setActions((current) => [item, ...current]); await post({ kind: "action", ...item }); setModal(null); setToast("Action added to this account's checklist.");
+    try { await post({ kind: "action", ...item }); setActions((current) => [item, ...current]); setModal(null); setToast("Action added to this account's checklist."); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "The checklist item could not be saved."); }
   }
   async function toggleAction(item: ActionItem) {
     const completed = item.status !== "completed";
     const updated: ActionItem = { ...item, status: completed ? "completed" : "planned", completedAt: completed ? new Date().toISOString() : null, completedPeriodId: completed ? selectedPeriod.id : null };
-    setActions((current) => unique([updated, ...current.filter((action) => action.id !== item.id)])); await post({ kind: "action", ...updated });
-    setToast(completed ? "Completed action added to this week's review notes." : "Action moved back to the open checklist.");
+    try { await post({ kind: "action", ...updated }); setActions((current) => unique([updated, ...current.filter((action) => action.id !== item.id)])); setToast(completed ? "Completed action added to this week's review notes." : "Action moved back to the open checklist."); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "The checklist change could not be saved."); }
   }
   async function toggleRecommendation(index: number) {
     const recommendation = selectedPeriod.recommendations[index];
@@ -220,32 +205,43 @@ export default function Jarvis() {
   }
   async function saveReviewNote() {
     const item: ReviewRecord = { id: currentReviewKey, accountId, periodId: selectedPeriod.id, note: reviewDraft.trim(), updatedAt: new Date().toISOString() };
-    setReviews((current) => unique([item, ...current.filter((review) => review.id !== item.id)])); await post({ kind: "review", ...item }); setToast("Weekly review note saved.");
+    try { await post({ kind: "review", ...item }); setReviews((current) => unique([item, ...current.filter((review) => review.id !== item.id)])); setToast("Weekly review note saved."); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "The review note could not be saved."); }
   }
   async function saveSkuEconomics(updated: DashboardSku) {
-    setSkus((current) => unique([updated, ...current.filter((item) => item.id !== updated.id)]));
-    const response = await post({ kind: "sku", ...updated }).catch(() => null);
-    const savedToServer = Boolean(response?.ok);
-    setLocalEconomics(updated, !savedToServer);
-    setToast(savedToServer ? `Manual economics saved for ${updated.name}.` : `Manual economics saved in this browser for ${updated.name}.`);
+    try { await post({ kind: "sku", ...updated }); setSkus((current) => unique([updated, ...current.filter((item) => item.id !== updated.id)])); setToast(`Manual economics saved centrally for ${updated.name}.`); }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : "Manual economics could not be saved."); throw reason; }
   }
 
   if (loading) return <main className="login-shell"><section className="login-card loading-card"><div className="login-mark"><Sparkles /></div><small>SECURE PORTFOLIO INTELLIGENCE</small><h1>JARVIS</h1><p>Loading your command center...</p></section></main>;
-  if (!account) return <main className="login-shell"><section className="login-card"><div className="login-mark"><AlertTriangle /></div><small>DATA UNAVAILABLE</small><h1>JARVIS</h1><p>The portfolio could not be loaded. Refresh the page to try again.</p></section></main>;
+  if (!account) return <main className="login-shell"><section className="login-card"><div className="login-mark"><Building2 /></div><small>{storage.writable ? "EMPTY CENTRAL WORKSPACE" : "DATA UNAVAILABLE"}</small><h1>JARVIS</h1><p>{loadError || (storage.writable ? "Create the first account to begin using the PSM operating layer." : "The portfolio could not be loaded. Refresh the page to try again.")}</p>{storage.writable && <form onSubmit={addAccount}><label>First account name<input name="name" required autoFocus /></label><button className="primary full">Create Account</button></form>}</section></main>;
 
-  return <div className="shell">
-    <aside className={mobile ? "open" : ""}><div className="brand"><b>JARVIS</b><small>Portfolio Intelligence</small><button aria-label="Close navigation" onClick={() => setMobile(false)}><X /></button></div><nav>{([['overview', BarChart3], ['accounts', Users], ['imports', FileSpreadsheet]] as const).map(([item, Icon]) => <button key={item} className={view === item ? "active" : ""} onClick={() => go(item)}><Icon size={19} />{item}</button>)}</nav><div className="system"><i /> Systems operational</div></aside>
-    <main><header><button className="menu" aria-label="Open navigation" onClick={() => setMobile(true)}><Menu /></button><label><Building2 /><select aria-label="Account" value={accountId} onChange={(event) => changeAccount(event.target.value)}>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown /></label><label><CalendarDays /><select aria-label="Saved reporting week" value={selectedPeriod.id.startsWith("empty-") ? "" : selectedPeriod.id} onChange={(event) => changePeriod(event.target.value)}><option value="" disabled>{accountPeriods.length ? "Select a saved week" : "No saved weeks"}</option>{accountPeriods.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}</select><ChevronDown /></label><button className="primary upload" onClick={() => setModal("upload")}><Upload /> Upload Reports</button></header>
+  return <JarvisAssistantProvider accounts={accounts} skus={skus} periods={periods} imports={imports} actions={actions} reviews={reviews} storage={storage} currentView={view} currentAccountId={view === "overview" || view === "my-day" ? undefined : accountId} currentPeriodId={selectedPeriod.id} onNavigate={navigateFromJarvis}>
+    <div className="shell">
+    <aside className={mobile ? "open" : ""}><div className="brand"><b>JARVIS</b><small>Portfolio Intelligence</small><button aria-label="Close navigation" onClick={() => setMobile(false)}><X /></button></div><nav>{([
+      { item: 'overview', label: 'Overview', Icon: BarChart3 },
+      { item: 'my-day', label: 'My Day', Icon: Clock3 },
+      { item: 'operations', label: 'Operations', Icon: BriefcaseBusiness },
+      { item: 'accounts', label: 'Accounts', Icon: Users },
+      { item: 'imports', label: 'Imports', Icon: FileSpreadsheet },
+      { item: 'jarvis', label: 'JARVIS Command Center', Icon: BrainCircuit },
+    ] as const).map(({ item, label, Icon }) => <button key={item} className={`${view === item ? "active" : ""} ${item === "jarvis" ? "angora-jarvis-nav-entry" : ""}`} onClick={() => item === "jarvis" ? openJarvisCommandCenter() : go(item)}><Icon size={19} />{label}</button>)}</nav><div className="system"><i /> {storage.writable ? `${storage.label} synced` : "Demo data · not synced"}</div></aside>
+    <main><header><button className="menu" aria-label="Open navigation" onClick={() => setMobile(true)}><Menu /></button><label><Building2 /><select aria-label="Account" value={accountId} onChange={(event) => changeAccount(event.target.value)}>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown /></label><label><CalendarDays /><select aria-label="Saved reporting week" value={selectedPeriod.id.startsWith("empty-") ? "" : selectedPeriod.id} onChange={(event) => changePeriod(event.target.value)}><option value="" disabled>{accountPeriods.length ? "Select a saved week" : "No saved weeks"}</option>{accountPeriods.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}</select><ChevronDown /></label><button className="primary upload" disabled={!storage.writable} onClick={() => setModal("upload")}><Upload /> Upload Reports</button></header>
+      {!storage.writable && view !== "my-day" && view !== "operations" && view !== "review" && <StorageBanner storage={storage} error={loadError} compact />}
+
+      {view === "my-day" && <PsmWorkspace mode="my-day" accounts={accounts} accountId={accountId} />}
+      {view === "operations" && <PsmWorkspace mode="operations" accounts={accounts} accountId={accountId} />}
+      {view === "jarvis" && <JarvisCommandCenter />}
 
       {view === "overview" && <section><Title eyebrow="Weekly command brief" title="Portfolio Overview" sub={`${selectedPeriod.label} · ${matchingPortfolioPeriods.length || 1} account${(matchingPortfolioPeriods.length || 1) === 1 ? "" : "s"}`} />
         <JarvisCompanion key={`portfolio-${selectedPeriod.id}`} account={account} period={selectedPeriod} periods={periods} skus={accountSkus} actions={accountActions} scope="portfolio" portfolioMetrics={portfolioMetrics} revenueChangePercent={portfolioRevenueChange} />
         <div className="net-revenue-hero"><div><small>PRIMARY PORTFOLIO METRIC</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(portfolioMetrics.netSales)}</strong><RevenueDelta value={portfolioRevenueChange} /></div><p>{wowNote(selectedPeriod, "netSales")} · after refunds</p></div><TrendingUp /></div>
         <div className="overview-grid revenue-grid"><Panel title="Portfolio Net Revenue by Week" sub="Total weekly sales after refunds, including organic and ad-driven sales. Hover any week for the exact amount."><WeeklySalesChart data={portfolioWeekly} /></Panel><Panel title="JARVIS Synopsis" sub="Confirmed drivers for this saved week">{selectedPeriod.insights.slice(0, 4).map((insight, index) => <Insight key={insight.title} n={String(index + 1).padStart(2, "0")} title={insight.title}>{insight.detail}</Insight>)}</Panel></div>
         <div className="kpis secondary-kpis"><Kpi label="Net Proceeds" value={money(portfolioMetrics.netProceeds)} note={`${money(portfolioMetrics.storage)} in storage cost`} icon={<Gauge />} /><Kpi label="Ad Spend" value={money(portfolioMetrics.adSpend)} note={`${integer(portfolioMetrics.clicks)} clicks · ${integer(portfolioMetrics.units)} gross units sold`} icon={<Target />} /><Kpi label="ACoS" value={pct(portfolioMetrics.acos)} note={placementNote(selectedPeriod)} icon={<BarChart3 />} /><Kpi label="Sessions" value={integer(portfolioMetrics.sessions)} note={`${integer(portfolioMetrics.units)} ordered units`} icon={<Users />} /></div>
-        <Panel title="Accounts" sub="Portfolio performance for the selected reporting week" right={<button className="secondary" onClick={() => setModal("account")}><Plus /> Add Account</button>}><Table><thead><tr><th>Account</th><th>Net Revenue</th><th>Net Proceeds</th><th>Ad Spend</th><th>ACoS</th><th>Inventory</th></tr></thead><tbody>{accounts.map((item) => { const period = periods.find((candidate) => candidate.accountId === item.id && candidate.startDate === selectedPeriod.startDate && candidate.endDate === selectedPeriod.endDate); return <tr key={item.id} onClick={() => { changeAccount(item.id); go("accounts"); }}><td><b>{item.name}</b><small>{period ? `${period.skus.length} active SKUs` : "No import for this week"}</small></td><td><b>{money(period?.metrics.netSales || 0)}</b></td><td className={(period?.metrics.netProceeds || 0) < 0 ? "bad" : ""}>{money(period?.metrics.netProceeds || 0)}</td><td>{money(period?.metrics.adSpend || 0)}</td><td>{pct(period?.metrics.acos || 0)}</td><td>{integer(period?.metrics.inventory || 0)}</td></tr>; })}</tbody></Table></Panel>
+        <Panel title="Accounts" sub="Portfolio performance for the selected reporting week" right={<button className="secondary" disabled={!storage.writable} onClick={() => setModal("account")}><Plus /> Add Account</button>}><Table><thead><tr><th>Account</th><th>Net Revenue</th><th>Net Proceeds</th><th>Ad Spend</th><th>ACoS</th><th>Inventory</th></tr></thead><tbody>{accounts.map((item) => { const period = periods.find((candidate) => candidate.accountId === item.id && candidate.startDate === selectedPeriod.startDate && candidate.endDate === selectedPeriod.endDate); return <tr key={item.id} onClick={() => { changeAccount(item.id); go("accounts"); }}><td><b>{item.name}</b><small>{period ? `${period.skus.length} active SKUs` : "No import for this week"}</small></td><td><b>{money(period?.metrics.netSales || 0)}</b></td><td className={(period?.metrics.netProceeds || 0) < 0 ? "bad" : ""}>{money(period?.metrics.netProceeds || 0)}</td><td>{money(period?.metrics.adSpend || 0)}</td><td>{pct(period?.metrics.acos || 0)}</td><td>{integer(period?.metrics.inventory || 0)}</td></tr>; })}</tbody></Table></Panel>
       </section>}
 
-      {view === "accounts" && <section><Title eyebrow="Account command center" title={account.name} sub={`${accountSkus.length} SKUs · ${selectedPeriod.label}`} right={<div className="buttons"><button className="secondary" onClick={() => setModal("editAccount")}><Pencil /> Edit Name</button><button className="secondary" onClick={() => setModal("sku")}><PackagePlus /> Add SKU</button><button className="primary" onClick={() => go("review")}><ClipboardCheck /> Start Weekly Business Review</button></div>} />
+      {view === "accounts" && <section><Title eyebrow="Account command center" title={account.name} sub={`${accountSkus.length} SKUs · ${selectedPeriod.label}`} right={<div className="buttons"><button className="secondary" disabled={!storage.writable} onClick={() => setModal("editAccount")}><Pencil /> Edit Name</button><button className="secondary" disabled={!storage.writable} onClick={() => setModal("sku")}><PackagePlus /> Add SKU</button><button className="primary" onClick={() => go("review")}><ClipboardCheck /> Start Weekly Business Review</button></div>} />
         <JarvisCompanion key={`account-${account.id}-${selectedPeriod.id}`} account={account} period={selectedPeriod} periods={periods} skus={accountSkus} actions={accountActions} scope="account" revenueChangePercent={netRevenueChange(selectedPeriod)} />
         <div className="account-revenue"><div><small>{selectedSku ? "PRIMARY SKU METRIC" : "PRIMARY ACCOUNT METRIC"}</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(accountScopeMetrics.netSales)}</strong><RevenueDelta value={accountScopeRevenueChange} /></div><p>{accountScopeRevenueNote} · after refunds</p></div><div className="account-chart"><WeeklySalesChart data={accountScopeWeekly} compact /></div></div>
         <div className="account-strip">{[["Net proceeds", money(accountScopeMetrics.netProceeds)], ["Ad spend", money(accountScopeMetrics.adSpend)], ["Sessions", integer(accountScopeMetrics.sessions)], ["FBA inventory", integer(accountScopeMetrics.inventory)], ["Open actions", String(openActionCount(selectedPeriod, accountActions, selectedSku?.id))]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
@@ -259,18 +255,19 @@ export default function Jarvis() {
       {view === "imports" && <section><Title eyebrow="Data operations" title="Import Center" sub="Every source file, reporting period, and parsing result stays attached to its account." right={<button className="primary" onClick={() => setModal("upload")}><Upload /> Upload Reports</button>} />
         <h3 className="section-label">Weekly Monday package</h3><div className="report-grid">{weeklyReports.map((report) => <ReportCard key={report} report={report} present={selectedPeriod.reports.includes(report as PeriodPayload["reports"][number])} period={selectedPeriod} />)}</div>
         <h3 className="section-label">Monthly search package</h3><div className="report-grid monthly">{monthlyReports.map((report) => <ReportCard key={report} report={report} present={periods.some((period) => period.accountId === accountId && period.reports.includes(report as PeriodPayload["reports"][number]))} period={selectedPeriod} />)}</div>
-        <Panel title="Import History" sub="Original files remain saved with the account and source period."><Table><thead><tr><th>Report</th><th>File</th><th>Coverage</th><th>Received</th><th>Status</th></tr></thead><tbody>{imports.filter((item) => item.accountId === accountId).map((item) => <tr key={item.id}><td><b>{item.reportType}</b></td><td>{item.filename}</td><td>{item.period}</td><td>{formatDate(item.receivedAt)}</td><td><span className={item.status.toLowerCase().includes("warning") ? "imported warning" : "imported"}><Check /> {item.status}</span></td></tr>)}</tbody></Table></Panel>
+        <Panel title="Import History" sub="Parsed report results stay attached to the account and source period. Original-file retention depends on configured file storage."><Table><thead><tr><th>Report</th><th>File</th><th>Coverage</th><th>Received</th><th>Status</th></tr></thead><tbody>{imports.filter((item) => item.accountId === accountId).map((item) => <tr key={item.id}><td><b>{item.reportType}</b></td><td>{item.filename}</td><td>{item.period}</td><td>{formatDate(item.receivedAt)}</td><td><span className={item.status.toLowerCase().includes("warning") ? "imported warning" : "imported"}><Check /> {item.status}</span></td></tr>)}</tbody></Table></Panel>
         <Panel title="Data Quality Notes" className="notes"><ul>{selectedPeriod.dataQuality.length ? selectedPeriod.dataQuality.map((note) => <li key={note}>{note}</li>) : <li>All required reports reconciled within the configured tolerance.</li>}</ul></Panel>
       </section>}
 
       {view === "review" && <section className="review-workspace"><Title eyebrow="Client-facing weekly review" title={`${account.name} Weekly Business Review`} sub={selectedPeriod.label} right={<button className="secondary" onClick={() => go("accounts")}><ArrowLeft /> Back to Account</button>} />
-        <div className="review-layout"><aside className="review-builder"><div className="builder-head"><small>REVIEW BUILDER</small><h2>Add this week&apos;s reports</h2><p>Drop reports one at a time or together. Each successful import refreshes the preview immediately.</p></div><label className={`review-drop ${uploading ? "loading" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void uploadReviewFiles(Array.from(event.dataTransfer.files)); }}><FileUp /><b>{uploading ? "Analyzing report..." : "Drop report files here"}</b><span>or click to browse</span><input type="file" accept=".csv,.xlsx,.xls,.txt" multiple disabled={uploading} onChange={(event) => { void uploadReviewFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} /></label><div className="review-report-list">{weeklyReports.map((report) => { const present = selectedPeriod.reports.includes(report as PeriodPayload["reports"][number]); return <div key={report} className={present ? "ready" : ""}><span>{present ? <CheckCircle2 /> : <AlertTriangle />}</span><p><b>{report}</b><small>{present ? "Included in preview" : "Waiting for report"}</small></p></div>; })}</div></aside>
+        <WeeklyReviewEditor account={account} period={selectedPeriod} completedWork={completedThisWeek.map((item) => `${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")} />
+        <div className="review-layout"><aside className="review-builder"><div className="builder-head"><small>REVIEW BUILDER</small><h2>Add this week&apos;s reports</h2><p>Drop reports one at a time or together. Each successful import refreshes the preview immediately.</p></div><label className={`review-drop ${uploading ? "loading" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (storage.writable) void uploadReviewFiles(Array.from(event.dataTransfer.files)); }}><FileUp /><b>{uploading ? "Analyzing report..." : storage.writable ? "Drop report files here" : "Central storage required"}</b><span>{storage.writable ? "or click to browse" : "Uploads are disabled in demo mode"}</span><input type="file" accept=".csv,.xlsx,.xls,.txt" multiple disabled={uploading || !storage.writable} onChange={(event) => { void uploadReviewFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} /></label><div className="review-report-list">{weeklyReports.map((report) => { const present = selectedPeriod.reports.includes(report as PeriodPayload["reports"][number]); return <div key={report} className={present ? "ready" : ""}><span>{present ? <CheckCircle2 /> : <AlertTriangle />}</span><p><b>{report}</b><small>{present ? "Included in preview" : "Waiting for report"}</small></p></div>; })}</div></aside>
           <div className="wbr-preview" aria-busy={uploading}><header><div><small>WEEKLY BUSINESS REVIEW</small><h1>{account.name}</h1><p>{selectedPeriod.label}</p></div></header><div className="client-kpis"><div className="primary-client-kpi"><span>Net Revenue</span><div className="metric-value-row"><strong>{money(selectedPeriod.metrics.netSales)}</strong><RevenueDelta value={netRevenueChange(selectedPeriod)} light /></div><small>{wowNote(selectedPeriod, "netSales")}</small></div><div><span>Units</span><strong>{integer(selectedPeriod.metrics.units)}</strong><small>{integer(selectedPeriod.metrics.sessions)} sessions</small></div><div><span>ACoS</span><strong>{pct(selectedPeriod.metrics.acos)}</strong><small>{money(selectedPeriod.metrics.adSpend)} spend</small></div></div>
             <ReviewSection title="Executive Summary"><p>{executiveSummary(selectedPeriod)}</p></ReviewSection>
             <ReviewSection title="Weekly Net Revenue Trend" sub="Total weekly sales after refunds, including organic and ad-driven sales. Hover a week to see the exact amount."><WeeklySalesChart data={accountWeekly} /></ReviewSection>
             <ReviewSection title="What We Saw Last Week"><div className="synopsis-list">{selectedPeriod.insights.map((insight) => <article key={insight.title}><span className={insight.tone} /><div><b>{insight.title}</b><p>{insight.detail}</p></div></article>)}{wins.map((win) => <article className="win" key={win}><span /><div><b>Win from a previous change</b><p>{win}</p></div></article>)}</div></ReviewSection>
             <ReviewSection title="What We Did This Week" sub="Completed checklist items are added here automatically."><ul className="completed-notes">{completedThisWeek.length ? completedThisWeek.map((item) => <li key={item.id}><CheckCircle2 /><span><b>{item.title}</b>{item.detail && <small>{item.detail}</small>}</span></li>) : <li className="empty-note">No checklist items have been marked complete for this review yet.</li>}</ul></ReviewSection>
-            <ReviewSection title="Additional Notes" sub="Optional client-facing context for this week."><textarea className="review-note" value={reviewDraft} onChange={(event) => setReviewDrafts((current) => ({ ...current, [currentReviewKey]: event.target.value }))} placeholder="Add any context you want the client to see..." rows={4} /><button className="secondary save-note" onClick={saveReviewNote}><Save /> Save Note</button></ReviewSection>
+            <ReviewSection title="Additional Notes" sub="Optional client-facing context for this week."><textarea className="review-note" value={reviewDraft} onChange={(event) => setReviewDrafts((current) => ({ ...current, [currentReviewKey]: event.target.value }))} placeholder="Add any context you want the client to see..." rows={4} /><button className="secondary save-note" disabled={!storage.writable} onClick={saveReviewNote}><Save /> Save Note</button></ReviewSection>
             {uploading && <div className="review-generating"><Sparkles /> Updating the client preview from the new report...</div>}
           </div></div>
       </section>}
@@ -284,12 +281,15 @@ export default function Jarvis() {
       {modal === "action" && <form onSubmit={addAction}><h2>Add Checklist Item</h2><p>Save what changed so the next review has the context needed to explain the result.</p><label>Product<select name="skuId" defaultValue={selectedSku?.id}>{accountSkus.map((sku) => <option key={sku.id} value={sku.id}>{sku.name}</option>)}</select></label><label>Action title<input name="title" required /></label><label>Details<textarea name="detail" rows={4} /></label><button className="primary full">Add to Checklist</button></form>}
     </div></div>}
     {toast && <div className="toast"><Check />{toast}</div>}
-  </div>;
+    </div>
+    <JarvisGlobalAssistant openCommandCenter={openJarvisCommandCenter} />
+    <JarvisSettingsDrawer />
+  </JarvisAssistantProvider>;
 }
 
 function UploadForm({ account, uploading, onSubmit }: { account: Account; uploading: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   const dates = previousCompletedWeek();
-  return <form onSubmit={onSubmit}><h2>Upload Reports</h2><p>Attach any or all weekly reports for {account.name}. JARVIS identifies each file, updates the saved week, and regenerates the account and SKU analysis.</p><div className="date-fields"><label>Week starts<input type="date" name="startDate" defaultValue={dates.start} required /></label><label>Week ends<input type="date" name="endDate" defaultValue={dates.end} required /></label></div><label className="drop"><Upload /><b>Choose Amazon report files</b><small>CSV, XLSX, XLS, or TXT · multiple files allowed</small><input name="files" type="file" accept=".csv,.xlsx,.xls,.txt" multiple required /></label><button className="primary full" disabled={uploading}>{uploading ? "Parsing reports..." : "Import and Analyze"}</button><small className="privacy-note">Original files are saved with this account. Overlapping reports update the same saved week instead of creating duplicate metrics.</small></form>;
+  return <form onSubmit={onSubmit}><h2>Upload Reports</h2><p>Attach any or all weekly reports for {account.name}. JARVIS identifies each file, updates the saved week, and regenerates the account and SKU analysis.</p><div className="date-fields"><label>Week starts<input type="date" name="startDate" defaultValue={dates.start} required /></label><label>Week ends<input type="date" name="endDate" defaultValue={dates.end} required /></label></div><label className="drop"><Upload /><b>Choose Amazon report files</b><small>CSV, XLSX, XLS, or TXT · multiple files allowed</small><input name="files" type="file" accept=".csv,.xlsx,.xls,.txt" multiple required /></label><button className="primary full" disabled={uploading}>{uploading ? "Parsing reports..." : "Import and Analyze"}</button><small className="privacy-note">Parsed results and coverage are saved centrally. Original files are retained when file storage is configured. Overlapping reports update the same saved week.</small></form>;
 }
 
 function ActionChecklist({ period, account, skus, actions, onToggleAction, onToggleRecommendation, onAdd }: { period: PeriodPayload; account: Account; skus: DashboardSku[]; actions: ActionItem[]; onToggleAction: (item: ActionItem) => void; onToggleRecommendation: (index: number) => void; onAdd: () => void }) {

@@ -1,74 +1,80 @@
-import { isAuthorizedRequest } from "../../../lib/jarvis-auth";
+import { hasConfiguredWriteAuth, isAuthorizedRequest, isAuthorizedWriteRequest } from "../../../lib/jarvis-auth";
 import { accountsSeed, actionSeed, importSeed, seedPeriod, seedSkus } from "../../../lib/jarvis-seed";
-import { getCloudflareRuntime, type D1Database } from "../../../lib/cloudflare-runtime";
+import { ensurePersistentSchema, getPersistentDatabase, storageLabel } from "../../../lib/persistent-database";
 
-type DbEnv = { DB: D1Database };
-
-async function ensureSchema() {
-  const runtime = await getCloudflareRuntime<DbEnv>();
-  const db = runtime?.DB;
-  if (!db) throw new Error("Persistent storage is not configured for this deployment.");
-  await db.batch([
-    db.prepare("CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'healthy', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS skus (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS imports (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, report_type TEXT NOT NULL, filename TEXT NOT NULL, period TEXT NOT NULL, received_at TEXT NOT NULL, status TEXT NOT NULL, object_key TEXT)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, period_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS report_summaries (id TEXT PRIMARY KEY, import_id TEXT NOT NULL, account_id TEXT NOT NULL, period_id TEXT NOT NULL, report_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS periods (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'weekly', label TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-  ]);
-  return db;
-}
+export const dynamic = "force-dynamic";
 
 function parsePayload<T>(value: unknown): T | null {
-  try { return JSON.parse(String(value)) as T; } catch { return null; }
+  try { return JSON.parse(String(value)) as T; }
+  catch { return null; }
+}
+
+function demoState() {
+  return {
+    accounts: accountsSeed,
+    skus: seedSkus,
+    imports: importSeed,
+    actions: actionSeed,
+    periods: [seedPeriod],
+    reviews: [],
+    storage: { mode: "demo", writable: false, label: "Demo data", detail: "Sample Caldwell data is shown. Changes are not saved centrally." },
+  };
 }
 
 export async function GET(request: Request) {
   if (!(await isAuthorizedRequest(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    const db = await ensureSchema();
+    const db = await getPersistentDatabase();
+    if (!db) return Response.json(demoState(), { headers: { "cache-control": "no-store", "x-jarvis-storage": "demo" } });
+    await ensurePersistentSchema(db);
     const [accounts, skus, imports, actions, periods, reviews] = await Promise.all([
-      db.prepare("SELECT id, name, status FROM accounts ORDER BY created_at").all(),
-      db.prepare("SELECT payload FROM skus ORDER BY created_at").all(),
-      db.prepare("SELECT id, account_id AS accountId, report_type AS reportType, filename, period, received_at AS receivedAt, status FROM imports ORDER BY received_at DESC").all(),
-      db.prepare("SELECT payload FROM actions ORDER BY created_at DESC").all(),
-      db.prepare("SELECT payload FROM periods ORDER BY end_date DESC").all(),
-      db.prepare("SELECT payload FROM reviews ORDER BY updated_at DESC").all(),
+      db.all("SELECT id, name, status FROM accounts ORDER BY created_at"),
+      db.all("SELECT payload FROM skus ORDER BY created_at"),
+      db.all('SELECT id, account_id AS "accountId", report_type AS "reportType", filename, period, received_at AS "receivedAt", status FROM imports ORDER BY received_at DESC'),
+      db.all("SELECT payload FROM actions ORDER BY created_at DESC"),
+      db.all("SELECT payload FROM periods ORDER BY end_date DESC"),
+      db.all("SELECT payload FROM reviews ORDER BY updated_at DESC"),
     ]);
-    const savedAccounts = accounts.results;
-    const savedSkus = skus.results.map((row) => parsePayload(row.payload)).filter(Boolean);
-    const savedImports = imports.results;
-    const savedActions = actions.results.map((row) => parsePayload(row.payload)).filter(Boolean);
-    const savedPeriods = periods.results.map((row) => parsePayload(row.payload)).filter(Boolean);
-    const savedReviews = reviews.results.map((row) => parsePayload(row.payload)).filter(Boolean);
+    const payloads = <T>(rows: Record<string, unknown>[]) => rows.map((row) => parsePayload<T>(row.payload)).filter((item): item is T => Boolean(item));
+    const writable = await hasConfiguredWriteAuth();
     return Response.json({
-      accounts: savedAccounts.length ? savedAccounts : accountsSeed,
-      skus: savedSkus.length ? savedSkus : seedSkus,
-      imports: savedImports.length ? savedImports : importSeed,
-      actions: savedActions.length ? savedActions : actionSeed,
-      periods: savedPeriods.length ? savedPeriods : [seedPeriod],
-      reviews: savedReviews,
-    }, { headers: { "cache-control": "no-store" } });
-  } catch {
-    return Response.json({ accounts: accountsSeed, skus: seedSkus, imports: importSeed, actions: actionSeed, periods: [seedPeriod], reviews: [] }, { headers: { "cache-control": "no-store", "x-jarvis-storage": "demo" } });
+      accounts,
+      skus: payloads(skus),
+      imports,
+      actions: payloads(actions),
+      periods: payloads(periods),
+      reviews: payloads(reviews),
+      storage: { mode: db.kind, writable, label: storageLabel(db.kind), detail: writable ? "Shared dashboard data is saved centrally." : "Set JARVIS_PASSCODE before enabling production writes." },
+    }, { headers: { "cache-control": "no-store", "x-jarvis-storage": db.kind } });
+  } catch (error) {
+    return Response.json({ ...demoState(), storage: { mode: "unavailable", writable: false, label: "Storage unavailable", detail: "The central database could not be reached. Sample data is labeled read-only." }, error: error instanceof Error ? error.message : "Storage failed" }, { status: 503, headers: { "cache-control": "no-store", "x-jarvis-storage": "unavailable" } });
   }
 }
 
 export async function POST(request: Request) {
-  if (!(await isAuthorizedRequest(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAuthorizedWriteRequest(request))) return Response.json({ error: "Protected writes require a configured JARVIS_PASSCODE and an authenticated session." }, { status: 401 });
   try {
     const payload = await request.json() as Record<string, unknown>;
-    const db = await ensureSchema();
+    const db = await getPersistentDatabase();
+    if (!db) return Response.json({ error: "Central storage is not configured. No changes were saved." }, { status: 503 });
+    await ensurePersistentSchema(db);
     const kind = String(payload.kind ?? "");
     if (kind === "account") {
-      await db.prepare("INSERT OR REPLACE INTO accounts (id, name, status) VALUES (?, ?, ?)").bind(String(payload.id), String(payload.name), String(payload.status ?? "healthy")).run();
+      const id = String(payload.id || "").trim(), name = String(payload.name || "").trim();
+      if (!id || !name) return Response.json({ error: "Account id and name are required." }, { status: 400 });
+      await db.run("INSERT INTO accounts (id, name, status) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, status = excluded.status", [id, name, String(payload.status ?? "healthy")]);
     } else if (kind === "sku") {
-      await db.prepare("INSERT OR REPLACE INTO skus (id, account_id, payload) VALUES (?, ?, ?)").bind(String(payload.id), String(payload.accountId), JSON.stringify(payload)).run();
+      const id = String(payload.id || "").trim(), accountId = String(payload.accountId || "").trim();
+      if (!id || !accountId) return Response.json({ error: "SKU id and account are required." }, { status: 400 });
+      await db.run("INSERT INTO skus (id, account_id, payload) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, payload = excluded.payload", [id, accountId, JSON.stringify(payload)]);
     } else if (kind === "action") {
-      await db.prepare("INSERT OR REPLACE INTO actions (id, account_id, payload) VALUES (?, ?, ?)").bind(String(payload.id), String(payload.accountId), JSON.stringify(payload)).run();
+      const id = String(payload.id || "").trim(), accountId = String(payload.accountId || "").trim(), title = String(payload.title || "").trim();
+      if (!id || !accountId || !title) return Response.json({ error: "Action id, account, and title are required." }, { status: 400 });
+      await db.run("INSERT INTO actions (id, account_id, payload) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, payload = excluded.payload", [id, accountId, JSON.stringify(payload)]);
     } else if (kind === "review") {
-      await db.prepare("INSERT OR REPLACE INTO reviews (id, account_id, period_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)").bind(String(payload.id), String(payload.accountId), String(payload.periodId), JSON.stringify(payload), String(payload.updatedAt ?? new Date().toISOString())).run();
+      const id = String(payload.id || "").trim(), accountId = String(payload.accountId || "").trim(), periodId = String(payload.periodId || "").trim();
+      if (!id || !accountId || !periodId) return Response.json({ error: "Review id, account, and period are required." }, { status: 400 });
+      await db.run("INSERT INTO reviews (id, account_id, period_id, payload, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, period_id = excluded.period_id, payload = excluded.payload, updated_at = excluded.updated_at", [id, accountId, periodId, JSON.stringify(payload), String(payload.updatedAt ?? new Date().toISOString())]);
     } else {
       return Response.json({ error: "Unknown record type" }, { status: 400 });
     }

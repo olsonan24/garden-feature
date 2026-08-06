@@ -61,6 +61,17 @@ export async function isAuthorizedRequest(request: Request): Promise<boolean> {
   return isAuthorizedCookie(request.headers.get("cookie"));
 }
 
+export async function hasConfiguredWriteAuth(): Promise<boolean> {
+  if (process.env.NODE_ENV === "development") return true;
+  return Boolean(await getPasscode());
+}
+
+export async function isAuthorizedWriteRequest(request: Request): Promise<boolean> {
+  if (process.env.NODE_ENV === "development") return true;
+  if (!(await getPasscode())) return false;
+  return isAuthorizedCookie(request.headers.get("cookie"));
+}
+
 export async function sessionCookie(): Promise<string> {
   const value = await expectedSession();
   return `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`;
