@@ -493,7 +493,7 @@ function NeuralCore({ thinking }: { thinking: boolean }) {
         const midX = (a.px + b.px) / 2 + (b.py - a.py) * bend;
         const midY = (a.py + b.py) / 2 - (b.px - a.px) * bend;
         context.beginPath(); context.moveTo(a.px, a.py); context.quadraticCurveTo(midX, midY, b.px, b.py);
-        context.strokeStyle = `rgba(255,147,54,${alpha})`;
+        context.strokeStyle = `rgba(141,155,255,${alpha})`;
         context.lineWidth = .22 + depth * .24 + activity * .05;
         context.stroke();
       }
@@ -518,7 +518,7 @@ function NeuralCore({ thinking }: { thinking: boolean }) {
         const y = a.py + (b.py - a.py) * t - (b.px - a.px) * curve;
         const glowRadius = 2.5 + a.depth * 2.7 + activity * 1.2;
         const glow = context.createRadialGradient(x, y, 0, x, y, glowRadius);
-        glow.addColorStop(0, "rgba(255,238,194,.88)"); glow.addColorStop(.22, "rgba(255,169,67,.52)"); glow.addColorStop(1, "rgba(255,104,12,0)");
+        glow.addColorStop(0, "rgba(226,231,255,.9)"); glow.addColorStop(.22, "rgba(141,155,255,.5)"); glow.addColorStop(1, "rgba(99,102,241,0)");
         context.fillStyle = glow; context.beginPath(); context.arc(x, y, glowRadius, 0, Math.PI * 2); context.fill();
         context.fillStyle = "rgba(255,239,198,.82)"; context.beginPath(); context.arc(x, y, .35 + a.depth * .24, 0, Math.PI * 2); context.fill();
         if (signal.progress >= 1) { nodes[edge.to].flash = 1; signals.splice(index, 1); }
@@ -530,11 +530,11 @@ function NeuralCore({ thinking }: { thinking: boolean }) {
         if (node.flash > .06) {
           const glowRadius = 2.5 + node.flash * 4;
           const glow = context.createRadialGradient(node.px, node.py, 0, node.px, node.py, glowRadius);
-          glow.addColorStop(0, `rgba(255,220,158,${.38 * node.flash})`); glow.addColorStop(1, "rgba(255,119,0,0)");
+          glow.addColorStop(0, `rgba(205,211,255,${.38 * node.flash})`); glow.addColorStop(1, "rgba(99,102,241,0)");
           context.fillStyle = glow; context.beginPath(); context.arc(node.px, node.py, glowRadius, 0, Math.PI * 2); context.fill();
         }
         const nodeAlpha = .18 + node.depth * .28 + nodePulse * .04 + node.flash * .24;
-        context.fillStyle = `rgba(255,166,69,${nodeAlpha})`;
+        context.fillStyle = `rgba(165,176,255,${nodeAlpha})`;
         context.beginPath(); context.arc(node.px, node.py, radius, 0, Math.PI * 2); context.fill();
         node.flash *= .94 - activity * .012;
       }
@@ -710,7 +710,7 @@ function WeeklySalesChart({ data, compact = false }: { data: WeeklySalesPoint[];
   const y = (value: number) => bottom - value / max * (bottom - top);
   const points = data.map((item, index) => `${x(index)},${y(item.sales)}`).join(" ");
   const active = hover === null ? null : data[hover];
-  return <div className={`sales-chart ${compact ? "compact" : ""}`} onMouseLeave={() => setHover(null)}><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Weekly total net revenue line chart"><defs><linearGradient id={`sales-fill-${compact ? "compact" : "full"}`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#ff8500" stopOpacity=".32" /><stop offset="1" stopColor="#ff8500" stopOpacity="0" /></linearGradient></defs>{[0, 1, 2, 3].map((index) => { const lineY = top + index * (bottom - top) / 3; return <line key={index} x1={left} x2={right} y1={lineY} y2={lineY} stroke="rgba(255,255,255,0.08)" />; })}{data.length > 1 && <polygon points={`${points} ${right},${bottom} ${left},${bottom}`} fill={`url(#sales-fill-${compact ? "compact" : "full"})`} />}{data.length > 1 && <polyline points={points} fill="none" stroke="#ff8500" strokeWidth="3" />}{data.map((item, index) => <circle key={`${item.startDate}-${item.endDate}`} cx={x(index)} cy={y(item.sales)} r={hover === index ? 6 : 4} fill="#ff9a2b" stroke="#0a1220" strokeWidth="3" tabIndex={0} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}><title>{`${item.label}: ${money(item.sales)}`}</title></circle>)}</svg>{active && <div className="chart-tooltip" style={{ left: `${(x(hover || 0) / width) * 100}%`, top: `${(y(active.sales) / height) * 100}%` }}><small>{active.label}</small><b>{money(active.sales)}</b><span>Net revenue</span></div>}{!compact && <div className="chart-dates" style={{ gridTemplateColumns: `repeat(${data.length},1fr)` }}>{data.map((item) => <span key={`${item.startDate}-${item.endDate}`}>{formatWeekRange(item.startDate, item.endDate)}</span>)}</div>}</div>;
+  return <div className={`sales-chart ${compact ? "compact" : ""}`} onMouseLeave={() => setHover(null)}><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Weekly total net revenue line chart"><defs><linearGradient id={`sales-fill-${compact ? "compact" : "full"}`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#6e7bf2" stopOpacity=".32" /><stop offset="1" stopColor="#6e7bf2" stopOpacity="0" /></linearGradient></defs>{[0, 1, 2, 3].map((index) => { const lineY = top + index * (bottom - top) / 3; return <line key={index} x1={left} x2={right} y1={lineY} y2={lineY} stroke="rgba(255,255,255,0.08)" />; })}{data.length > 1 && <polygon points={`${points} ${right},${bottom} ${left},${bottom}`} fill={`url(#sales-fill-${compact ? "compact" : "full"})`} />}{data.length > 1 && <polyline points={points} fill="none" stroke="#8d9bff" strokeWidth="3" />}{data.map((item, index) => <circle key={`${item.startDate}-${item.endDate}`} cx={x(index)} cy={y(item.sales)} r={hover === index ? 6 : 4} fill="#a5b0ff" stroke="#0a1220" strokeWidth="3" tabIndex={0} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}><title>{`${item.label}: ${money(item.sales)}`}</title></circle>)}</svg>{active && <div className="chart-tooltip" style={{ left: `${(x(hover || 0) / width) * 100}%`, top: `${(y(active.sales) / height) * 100}%` }}><small>{active.label}</small><b>{money(active.sales)}</b><span>Net revenue</span></div>}{!compact && <div className="chart-dates" style={{ gridTemplateColumns: `repeat(${data.length},1fr)` }}>{data.map((item) => <span key={`${item.startDate}-${item.endDate}`}>{formatWeekRange(item.startDate, item.endDate)}</span>)}</div>}</div>;
 }
 
 function aggregateMetrics(periods: PeriodPayload[]): DashboardMetrics {
