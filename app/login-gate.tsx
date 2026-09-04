@@ -30,16 +30,15 @@ export default function LoginGate() {
     <section className="login-card" aria-labelledby="jarvis-login-title">
       <div className="login-mark"><ShieldCheck /></div>
       <small>SECURE PORTFOLIO INTELLIGENCE</small>
-      <h1 id="jarvis-login-title">JARVIS</h1>
+      <h1 id="jarvis-login-title">The Garden</h1>
       <p>Enter your private access code to open the operations cockpit.</p>
       <form onSubmit={unlock}>
         <label htmlFor="passcode">Passcode</label>
         <div className="passcode-field"><LockKeyhole /><input id="passcode" name="passcode" type="password" autoComplete="current-password" autoCapitalize="characters" autoFocus required /></div>
         {error && <div className="login-error" role="alert">{error}</div>}
-        <button className="primary full" disabled={loading}>{loading ? "Verifying..." : "Unlock JARVIS"}</button>
+        <button className="primary full" disabled={loading}>{loading ? "Verifying..." : "Unlock The Garden"}</button>
       </form>
       <footer><i /> Encrypted session · expires after 7 days</footer>
     </section>
   </main>;
 }
-

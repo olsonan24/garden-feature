@@ -304,7 +304,7 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
   }
 
   if (!rows.length) warnings.push("The file contained no readable data rows.");
-  if (type === "Unclassified Report") warnings.push("JARVIS could not identify this Amazon report type from its filename or columns.");
+  if (type === "Unclassified Report") warnings.push("The Garden could not identify this Amazon report type from its filename or columns.");
   return {
     type,
     filename,

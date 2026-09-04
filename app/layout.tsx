@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "JARVIS | Portfolio Intelligence",
+  title: "The Garden | Portfolio Intelligence",
   description: "Persistent Amazon account, SKU, advertising, profitability, and inventory intelligence.",
   other: {
     "codex-preview": "development",

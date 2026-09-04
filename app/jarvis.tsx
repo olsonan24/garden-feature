@@ -179,7 +179,7 @@ export default function Jarvis() {
   async function addAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("name") || "").trim();
     const item: Account = { id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`, name, status: "healthy" };
-    setAccounts((current) => [...current, item]); await post({ kind: "account", ...item }); changeAccount(item.id); setView("accounts"); setModal(null); setToast(`${name} added to JARVIS.`);
+    setAccounts((current) => [...current, item]); await post({ kind: "account", ...item }); changeAccount(item.id); setView("accounts"); setModal(null); setToast(`${name} added to The Garden.`);
   }
   async function editAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("name") || "").trim();
@@ -225,16 +225,16 @@ export default function Jarvis() {
     setToast(savedToServer ? `Manual economics saved for ${updated.name}.` : `Manual economics saved in this browser for ${updated.name}.`);
   }
 
-  if (loading) return <main className="login-shell"><section className="login-card loading-card"><div className="login-mark"><Sparkles /></div><small>SECURE PORTFOLIO INTELLIGENCE</small><h1>JARVIS</h1><p>Loading your command center...</p></section></main>;
-  if (!account) return <main className="login-shell"><section className="login-card"><div className="login-mark"><AlertTriangle /></div><small>DATA UNAVAILABLE</small><h1>JARVIS</h1><p>The portfolio could not be loaded. Refresh the page to try again.</p></section></main>;
+  if (loading) return <main className="login-shell"><section className="login-card loading-card"><div className="login-mark"><Sparkles /></div><small>SECURE PORTFOLIO INTELLIGENCE</small><h1>The Garden</h1><p>Loading your command center...</p></section></main>;
+  if (!account) return <main className="login-shell"><section className="login-card"><div className="login-mark"><AlertTriangle /></div><small>DATA UNAVAILABLE</small><h1>The Garden</h1><p>The portfolio could not be loaded. Refresh the page to try again.</p></section></main>;
 
   return <div className="shell">
-    <aside className={mobile ? "open" : ""}><div className="brand"><b>JARVIS</b><small>Portfolio Intelligence</small><button aria-label="Close navigation" onClick={() => setMobile(false)}><X /></button></div><nav>{([['overview', BarChart3], ['accounts', Users], ['imports', FileSpreadsheet]] as const).map(([item, Icon]) => <button key={item} className={view === item ? "active" : ""} onClick={() => go(item)}><Icon size={19} />{item}</button>)}</nav><div className="system"><i /> Systems operational</div></aside>
+    <aside className={mobile ? "open" : ""}><div className="brand"><b>The Garden</b><small>Portfolio Intelligence</small><button aria-label="Close navigation" onClick={() => setMobile(false)}><X /></button></div><nav>{([['overview', BarChart3], ['accounts', Users], ['imports', FileSpreadsheet]] as const).map(([item, Icon]) => <button key={item} className={view === item ? "active" : ""} onClick={() => go(item)}><Icon size={19} />{item}</button>)}</nav><div className="system"><i /> Systems operational</div></aside>
     <main><header><button className="menu" aria-label="Open navigation" onClick={() => setMobile(true)}><Menu /></button><label><Building2 /><select aria-label="Account" value={accountId} onChange={(event) => changeAccount(event.target.value)}>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown /></label><label><CalendarDays /><select aria-label="Saved reporting week" value={selectedPeriod.id.startsWith("empty-") ? "" : selectedPeriod.id} onChange={(event) => changePeriod(event.target.value)}><option value="" disabled>{accountPeriods.length ? "Select a saved week" : "No saved weeks"}</option>{accountPeriods.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}</select><ChevronDown /></label><button className="primary upload" onClick={() => setModal("upload")}><Upload /> Upload Reports</button></header>
 
       {view === "overview" && <section><Title eyebrow="Weekly command brief" title="Portfolio Overview" sub={`${selectedPeriod.label} · ${matchingPortfolioPeriods.length || 1} account${(matchingPortfolioPeriods.length || 1) === 1 ? "" : "s"}`} />
         <div className="net-revenue-hero"><div><small>PRIMARY PORTFOLIO METRIC</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(rangedPortfolioRevenue)}</strong><RevenueDelta value={portfolioDailyChange ?? portfolioRevenueChange} /></div><p>{portfolioRevenueNote} · after refunds</p></div><PortfolioRangePicker key={`${activePortfolioRange.startDate}:${activePortfolioRange.endDate}`} range={activePortfolioRange} selectedPeriod={selectedPeriod} open={portfolioRangeOpen} onOpenChange={setPortfolioRangeOpen} onApply={setPortfolioRange} /></div>
-        <div className="overview-grid revenue-grid"><Panel title="Portfolio Net Revenue by Week" sub="Total weekly sales after refunds, including organic and ad-driven sales. Hover any week for the exact amount."><WeeklySalesChart data={portfolioWeekly} /></Panel><Panel title="JARVIS Synopsis" sub="Confirmed drivers for this saved week">{selectedPeriod.insights.slice(0, 4).map((insight, index) => <Insight key={insight.title} n={String(index + 1).padStart(2, "0")} title={insight.title}>{insight.detail}</Insight>)}</Panel></div>
+        <div className="overview-grid revenue-grid"><Panel title="Portfolio Net Revenue by Week" sub="Total weekly sales after refunds, including organic and ad-driven sales. Hover any week for the exact amount."><WeeklySalesChart data={portfolioWeekly} /></Panel><Panel title="The Garden Synopsis" sub="Confirmed drivers for this saved week">{selectedPeriod.insights.slice(0, 4).map((insight, index) => <Insight key={insight.title} n={String(index + 1).padStart(2, "0")} title={insight.title}>{insight.detail}</Insight>)}</Panel></div>
         <div className="kpis secondary-kpis"><Kpi label="Net Proceeds" value={money(portfolioMetrics.netProceeds)} note={`${money(portfolioMetrics.storage)} in storage cost`} icon={<Gauge />} /><Kpi label="Ad Spend" value={money(portfolioMetrics.adSpend)} note={`${integer(portfolioMetrics.clicks)} clicks · ${integer(portfolioMetrics.units)} gross units sold`} icon={<Target />} /><Kpi label="ACoS" value={pct(portfolioMetrics.acos)} note={placementNote(selectedPeriod)} icon={<BarChart3 />} /><Kpi label="Sessions" value={integer(portfolioMetrics.sessions)} note={`${integer(portfolioMetrics.units)} ordered units`} icon={<Users />} /></div>
         <Panel title="Accounts" sub="Portfolio performance for the selected reporting week" right={<button className="secondary" onClick={() => setModal("account")}><Plus /> Add Account</button>}><Table><thead><tr><th>Account</th><th>Net Revenue</th><th>Net Proceeds</th><th>Ad Spend</th><th>ACoS</th><th>Inventory</th></tr></thead><tbody>{accounts.map((item) => { const period = periods.find((candidate) => candidate.accountId === item.id && candidate.startDate === selectedPeriod.startDate && candidate.endDate === selectedPeriod.endDate); return <tr key={item.id} onClick={() => { changeAccount(item.id); go("accounts"); }}><td><b>{item.name}</b><small>{period ? `${period.skus.length} active SKUs` : "No import for this week"}</small></td><td><b>{money(period?.metrics.netSales || 0)}</b></td><td className={(period?.metrics.netProceeds || 0) < 0 ? "bad" : ""}>{money(period?.metrics.netProceeds || 0)}</td><td>{money(period?.metrics.adSpend || 0)}</td><td>{pct(period?.metrics.acos || 0)}</td><td>{integer(period?.metrics.inventory || 0)}</td></tr>; })}</tbody></Table></Panel>
       </section>}
@@ -272,7 +272,7 @@ export default function Jarvis() {
     {modal && <div className="backdrop" onMouseDown={() => !uploading && setModal(null)}><div className="modal" onMouseDown={(event) => event.stopPropagation()}><button className="close" aria-label="Close modal" disabled={uploading} onClick={() => setModal(null)}><X /></button>
       {modal === "upload" && <UploadForm account={account} uploading={uploading} onSubmit={upload} />}
       {modal === "account" && <form onSubmit={addAccount}><h2>Add Account</h2><p>Create the account once. Its SKUs, imports, notes, and history stay attached.</p><label>Account name<input name="name" required autoFocus /></label><button className="primary full">Add Account</button></form>}
-      {modal === "editAccount" && <form onSubmit={editAccount}><h2>Edit Account Name</h2><p>Use the official Seller Central account name. This updates every JARVIS view without changing the saved history.</p><label>Official account name<input name="name" defaultValue={account.name} required autoFocus /></label><button className="primary full">Save Account Name</button></form>}
+      {modal === "editAccount" && <form onSubmit={editAccount}><h2>Edit Account Name</h2><p>Use the official Seller Central account name. This updates every view in The Garden without changing the saved history.</p><label>Official account name<input name="name" defaultValue={account.name} required autoFocus /></label><button className="primary full">Save Account Name</button></form>}
       {modal === "sku" && <form onSubmit={addSku}><h2>Add SKU</h2><p>Add a product manually or let the next report identify it.</p><label>Product name<input name="name" required /></label><label>Seller SKU<input name="sku" required /></label><label>ASIN<input name="asin" /></label><label>Amazon listing link<input name="listingUrl" type="url" placeholder="https://www.amazon.com/dp/..." /></label><button className="primary full">Add SKU</button></form>}
     </div></div>}
     {toast && <div className="toast"><Check />{toast}</div>}
@@ -281,7 +281,7 @@ export default function Jarvis() {
 
 function UploadForm({ account, uploading, onSubmit }: { account: Account; uploading: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   const dates = previousCompletedWeek();
-  return <form onSubmit={onSubmit}><h2>Upload Reports</h2><p>Attach any or all weekly reports for {account.name}. JARVIS identifies each file, updates the saved week, and regenerates the account and SKU analysis.</p><div className="date-fields"><label>Week starts<input type="date" name="startDate" defaultValue={dates.start} required /></label><label>Week ends<input type="date" name="endDate" defaultValue={dates.end} required /></label></div><label className="drop"><Upload /><b>Choose Amazon report files</b><small>CSV, XLSX, XLS, or TXT · multiple files allowed</small><input name="files" type="file" accept=".csv,.xlsx,.xls,.txt" multiple required /></label><button className="primary full" disabled={uploading}>{uploading ? "Parsing reports..." : "Import and Analyze"}</button><small className="privacy-note">Original files are saved with this account. Overlapping reports update the same saved week instead of creating duplicate metrics.</small></form>;
+  return <form onSubmit={onSubmit}><h2>Upload Reports</h2><p>Attach any or all weekly reports for {account.name}. The Garden identifies each file, updates the saved week, and regenerates the account and SKU analysis.</p><div className="date-fields"><label>Week starts<input type="date" name="startDate" defaultValue={dates.start} required /></label><label>Week ends<input type="date" name="endDate" defaultValue={dates.end} required /></label></div><label className="drop"><Upload /><b>Choose Amazon report files</b><small>CSV, XLSX, XLS, or TXT · multiple files allowed</small><input name="files" type="file" accept=".csv,.xlsx,.xls,.txt" multiple required /></label><button className="primary full" disabled={uploading}>{uploading ? "Parsing reports..." : "Import and Analyze"}</button><small className="privacy-note">Original files are saved with this account. Overlapping reports update the same saved week instead of creating duplicate metrics.</small></form>;
 }
 
 function PortfolioRangePicker({ range, selectedPeriod, open, onOpenChange, onApply }: { range: DateRange; selectedPeriod: PeriodPayload; open: boolean; onOpenChange: (open: boolean) => void; onApply: (range: DateRange) => void }) {
@@ -392,11 +392,11 @@ function JarvisCompanion({ account, period, periods, skus, actions, scope, portf
   const suggestions = ["How did yesterday compare?", "What changed day over day?", "Which SKU needs attention?", "How are ads performing?"];
   return <article className={`jarvis-command ${phase}`}>
     <div className="jarvis-visual"><NeuralCore thinking={phase === "thinking"} /><small><i /> {status}</small></div>
-    <div className="jarvis-console"><div className="jarvis-console-head"><div><small>JARVIS INTELLIGENCE</small><h2>Ask the command center</h2></div></div>
+    <div className="jarvis-console"><div className="jarvis-console-head"><div><small>THE GARDEN INTELLIGENCE</small><h2>Ask the command center</h2></div></div>
       <div className="jarvis-response" aria-live="polite">{phase === "thinking" ? <><span className="thinking-dots"><i /><i /><i /></span>Cross-referencing saved account history...</> : <p>{answer}</p>}</div>
       <div className="jarvis-prompts">{suggestions.map((item) => <button key={item} onClick={() => ask(item)}>{item}</button>)}</div>
-      <form className="jarvis-chat" onSubmit={submit}><input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Ask JARVIS about yesterday, ads, inventory, or any SKU..." aria-label="Ask JARVIS" /><button type="submit" disabled={!prompt.trim() || phase === "thinking"} aria-label="Send question"><Send /></button></form>
-      <small className="jarvis-data-note">Answers use the selected reporting period and saved JARVIS history.</small>
+      <form className="jarvis-chat" onSubmit={submit}><input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Ask The Garden about yesterday, ads, inventory, or any SKU..." aria-label="Ask The Garden" /><button type="submit" disabled={!prompt.trim() || phase === "thinking"} aria-label="Send question"><Send /></button></form>
+      <small className="jarvis-data-note">Answers use the selected reporting period and saved history in The Garden.</small>
     </div>
   </article>;
 }
@@ -571,7 +571,7 @@ function NeuralCore({ thinking }: { thinking: boolean }) {
     return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, []);
 
-  return <div className={`neural-core ${thinking ? "active" : ""}`} role="img" aria-label={thinking ? "JARVIS neural network processing" : "JARVIS neural network online"}><canvas ref={canvasRef} /></div>;
+  return <div className={`neural-core ${thinking ? "active" : ""}`} role="img" aria-label={thinking ? "The Garden neural network processing" : "The Garden neural network online"}><canvas ref={canvasRef} /></div>;
 }
 
 type TrailingWindow = 6 | 8 | 12;
@@ -678,7 +678,7 @@ function EconomicsFormula({ label, value, detail, negative = false }: { label: s
 
 function buildJarvisAnswer(question: string, context: { account: Account; period: PeriodPayload; periods: PeriodPayload[]; skus: DashboardSku[]; actions: ActionItem[]; scope: "portfolio" | "account"; metrics: DashboardMetrics; revenueChangePercent?: number }) {
   const { account, period, periods, skus, actions, scope, metrics, revenueChangePercent } = context;
-  const q = question.toLowerCase().replace(/^hey[, ]+jarvis[, ]*/, "");
+  const q = question.toLowerCase().replace(/^hey[, ]+(jarvis|the garden)[, ]*/, "");
   const label = scope === "portfolio" ? "the portfolio" : account.name;
   const delta = period.wow.netSales;
   const priorRevenue = delta === undefined ? undefined : period.metrics.netSales - delta;

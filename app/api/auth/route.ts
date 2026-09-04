@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       headers: { "content-type": "application/json", "set-cookie": await sessionCookie(), "cache-control": "no-store" },
     });
   } catch {
-    return Response.json({ error: "JARVIS could not verify the passcode." }, { status: 500 });
+    return Response.json({ error: "The Garden could not verify the passcode." }, { status: 500 });
   }
 }
 

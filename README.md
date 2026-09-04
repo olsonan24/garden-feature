@@ -1,4 +1,4 @@
-# JARVIS Portfolio Intelligence
+# The Garden Portfolio Intelligence
 
 A Next.js dashboard for analyzing Amazon Seller Central reports, monitoring
 portfolio health, and tracking account, SKU, advertising, inventory, and review

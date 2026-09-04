@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------
-   JARVIS feature components · Obsidian Glass
+   The Garden feature components · Obsidian Glass
    Companion, revenue heroes, charts, checklist, review workspace,
    listing reputation, inventory velocity, unit economics.
    ------------------------------------------------------------------ */
@@ -233,7 +233,7 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------------------------------------------------------------
-   JARVIS companion
+   The Garden companion
    --------------------------------------------------------------- */
 .jarvis-command {
   position: relative; min-height: 340px; margin-bottom: 14px; padding: 26px 30px;
