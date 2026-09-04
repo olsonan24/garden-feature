@@ -1,4 +1,4 @@
-import type { Candidate, ProductPartial, ReportSummary, ReportType } from "./report-parser";
+import type { Candidate, DailyMetric, ProductPartial, ReportSummary, ReportType } from "./report-parser";
 
 export type Status = "critical" | "attention" | "monitor" | "healthy";
 
@@ -90,7 +90,7 @@ export type PeriodPayload = {
   status: Status;
   metrics: DashboardMetrics;
   wow: Partial<Record<keyof DashboardMetrics, number>>;
-  daily: Array<{ date: string; spend: number; sales: number; orders: number; clicks: number }>;
+  daily: DailyMetric[];
   skus: DashboardSku[];
   insights: Array<{ title: string; detail: string; tone: Status }>;
   recommendations: Array<{ skuId?: string; title: string; detail: string; status: string }>;
@@ -179,6 +179,10 @@ function productRecommendation(product: Omit<DashboardSku, "status" | "issue" | 
 
 function sum(items: DashboardSku[], field: keyof DashboardSku) {
   return items.reduce((total, item) => total + (typeof item[field] === "number" ? Number(item[field]) : 0), 0);
+}
+
+function sameSkuIdentity(sku: KnownSku, item: Pick<DailyMetric, "sku" | "asin" | "skuId">) {
+  return item.skuId === sku.id || Boolean(item.sku && sku.sku && clean(item.sku) === clean(sku.sku)) || Boolean(item.asin && sku.asin && clean(item.asin) === clean(sku.asin));
 }
 
 function reportSpend(summary: ReportSummary) {
@@ -343,11 +347,18 @@ export function buildPeriodAnalysis(args: {
   const missingCogs = skus.filter((sku) => sku.sales > 0 && sku.cogs === 0).map((sku) => sku.name);
   if (missingCogs.length) dataQuality.push(`COGS is missing for: ${missingCogs.join(", ")}.`);
 
-  const dailyMap = new Map<string, PeriodPayload["daily"][number]>();
+  const dailyMap = new Map<string, DailyMetric>();
   for (const item of summaries.flatMap((summary) => summary.daily)) {
-    const prior = dailyMap.get(item.date) || { date: item.date, spend: 0, sales: 0, orders: 0, clicks: 0 };
+    const dailySku = skus.find((sku) => sameSkuIdentity(sku, item));
+    const skuId = item.skuId || dailySku?.id;
+    const skuKey = skuId || clean(item.sku) || clean(item.asin);
+    const key = skuKey ? `${item.date}:${skuKey}` : item.date;
+    const prior = dailyMap.get(key) || { date: item.date, spend: 0, sales: 0, orders: 0, clicks: 0, sku: item.sku, asin: item.asin, skuId };
     prior.spend += item.spend; prior.sales += item.sales; prior.orders += item.orders; prior.clicks += item.clicks;
-    dailyMap.set(item.date, prior);
+    if (skuId) prior.skuId = skuId;
+    if (item.sku && !prior.sku) prior.sku = item.sku;
+    if (item.asin && !prior.asin) prior.asin = item.asin;
+    dailyMap.set(key, prior);
   }
   const placements = summaries.flatMap((summary) => summary.placements).map((item) => ({ ...item, spend: round(item.spend), sales: round(item.sales), acos: round(item.sales ? item.spend / item.sales * 100 : item.spend ? 999 : 0) }));
   const funnel = summaries.flatMap((summary) => summary.funnel).sort((a, b) => b.volume - a.volume).slice(0, 30);

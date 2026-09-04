@@ -79,13 +79,24 @@ export type ReportSummary = {
   type: ReportType;
   filename: string;
   products: ProductPartial[];
-  daily: Array<{ date: string; spend: number; sales: number; orders: number; clicks: number }>;
+  daily: DailyMetric[];
   candidates: Candidate[];
   placements: PlacementMetric[];
   funnel: FunnelMetric[];
   dateMin?: string;
   dateMax?: string;
   warnings: string[];
+};
+
+export type DailyMetric = {
+  date: string;
+  spend: number;
+  sales: number;
+  orders: number;
+  clicks: number;
+  sku?: string;
+  asin?: string;
+  skuId?: string;
 };
 
 type Row = Record<string, unknown>;
@@ -187,7 +198,7 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
   const rows = workbookRows(bytes);
   const type = inferReportType(filename, rows);
   const products: ProductPartial[] = [];
-  const daily = new Map<string, { date: string; spend: number; sales: number; orders: number; clicks: number }>();
+  const daily = new Map<string, DailyMetric>();
   const candidates: Candidate[] = [];
   const placements = new Map<string, PlacementMetric>();
   const funnel: FunnelMetric[] = [];
@@ -241,9 +252,11 @@ export function parseAmazonReport(bytes: ArrayBuffer, filename: string): ReportS
       } satisfies ProductPartial;
       products.push(partial);
       if (rowDate) {
-        const prior = daily.get(rowDate) || { date: rowDate, spend: 0, sales: 0, orders: 0, clicks: 0 };
+        const identityKey = normalize(identity.sku || identity.asin || "");
+        const key = identityKey ? `${rowDate}:${identityKey}` : rowDate;
+        const prior = daily.get(key) || { date: rowDate, spend: 0, sales: 0, orders: 0, clicks: 0, sku: identity.sku || undefined, asin: identity.asin || undefined };
         prior.spend += partial.adSpend || 0; prior.sales += partial.adSales || 0; prior.orders += partial.adOrders || 0; prior.clicks += partial.clicks || 0;
-        daily.set(rowDate, prior);
+        daily.set(key, prior);
       }
     } else if (type === "Search Term" || type === "Targeting") {
       candidates.push({

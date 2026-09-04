@@ -2,9 +2,9 @@
 
 import {
   AlertTriangle, ArrowDownRight, ArrowLeft, ArrowUpRight, BarChart3, Building2, CalendarDays, Check, CheckCircle2,
-  ChevronDown, ChevronRight, ClipboardCheck, ExternalLink, FileSpreadsheet,
+  ChevronDown, ClipboardCheck, ExternalLink, FileSpreadsheet,
   FileUp, Gauge, Menu, PackagePlus, Pencil, Plus, Save, Search, Send, Sparkles, Target,
-  RefreshCw, Star, TrendingUp, Upload, Users, X,
+  RefreshCw, Star, Upload, Users, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { DashboardMetrics, DashboardSku, PeriodPayload, Status } from "../lib/analyze-reports";
@@ -17,6 +17,7 @@ type ActionItem = { id: string; accountId: string; skuId?: string | null; title:
 type ReviewRecord = { id: string; accountId: string; periodId: string; note: string; updatedAt: string };
 type WeeklySalesPoint = { startDate: string; endDate: string; label: string; sales: number };
 type JarvisPhase = "idle" | "thinking";
+type DateRange = { startDate: string; endDate: string; label: string };
 
 const weeklyReports = ["SKU Economics", "Business Report by Child ASIN", "Advertised Product", "Search Term", "Targeting", "Placement", "Manage FBA Inventory"];
 const monthlyReports = ["Search Query Performance", "Search Catalog Performance"];
@@ -95,11 +96,13 @@ export default function Jarvis() {
   const [periodId, setPeriodId] = useState("");
   const [skuId, setSkuId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState<null | "upload" | "account" | "editAccount" | "sku" | "action">(null);
+  const [modal, setModal] = useState<null | "upload" | "account" | "editAccount" | "sku">(null);
   const [toast, setToast] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
+  const [portfolioRange, setPortfolioRange] = useState<DateRange | null>(null);
+  const [portfolioRangeOpen, setPortfolioRangeOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/state").then((response) => response.ok ? response.json() : null).then((data) => {
@@ -123,7 +126,13 @@ export default function Jarvis() {
   const matchingPortfolioPeriods = periods.filter((period) => period.kind === "weekly" && period.startDate === selectedPeriod.startDate && period.endDate === selectedPeriod.endDate);
   const portfolioPeriods = matchingPortfolioPeriods.length ? matchingPortfolioPeriods : [selectedPeriod];
   const portfolioMetrics = aggregateMetrics(portfolioPeriods);
+  const usingDefaultPortfolioRange = !portfolioRange;
+  const activePortfolioRange = portfolioRange || { startDate: selectedPeriod.startDate, endDate: selectedPeriod.endDate, label: "This week" };
+  const rangedPortfolioDaily = rangeDailyTrend(periods.length ? periods.filter((period) => period.kind === "weekly") : portfolioPeriods, activePortfolioRange);
+  const rangedPortfolioRevenue = rangedPortfolioDaily.length ? rangedPortfolioDaily.reduce((total, item) => total + item.sales, 0) : usingDefaultPortfolioRange ? portfolioMetrics.netSales : 0;
   const portfolioWeekly = portfolioSalesTrend(periods, selectedPeriod.endDate);
+  const portfolioDailyChange = latestSalesChange(rangedPortfolioDaily);
+  const portfolioRevenueNote = latestSalesNote(rangedPortfolioDaily) || (rangedPortfolioDaily.length ? `${rangeLabel(activePortfolioRange)} selected` : usingDefaultPortfolioRange ? wowNote(selectedPeriod, "netSales") : `No daily rows for ${rangeLabel(activePortfolioRange)}`);
   const accountWeekly = accountSalesTrend(periods, accountId, selectedPeriod.endDate);
   const portfolioRevenueChange = portfolioNetRevenueChange(portfolioPeriods, periods);
   const accountActions = actions.filter((action) => action.accountId === accountId);
@@ -146,19 +155,22 @@ export default function Jarvis() {
     sessions: accountSkuTotals.sessions,
     inventory: accountSkuTotals.inventory,
   };
-  const accountScopeWeekly = selectedSku ? skuSalesTrend(periods, accountId, selectedSku, selectedPeriod.endDate) : accountWeekly;
-  const accountScopeRevenueChange = selectedSku ? skuNetRevenueChange(selectedPeriod, periods, selectedSku) : netRevenueChange(selectedPeriod);
-  const accountScopeRevenueNote = selectedSku ? skuWowNote(selectedPeriod, periods, selectedSku) : wowNote(selectedPeriod, "netSales");
+  const accountScopeDaily = selectedSku ? skuDailyTrend(selectedPeriod, selectedSku) : periodDailyTrend([selectedPeriod]);
+  const accountScopeDailyChange = latestSalesChange(accountScopeDaily);
+  const accountScopeRevenueChange = accountScopeDailyChange ?? (selectedSku ? skuNetRevenueChange(selectedPeriod, periods, selectedSku) : netRevenueChange(selectedPeriod));
+  const accountScopeRevenueNote = latestSalesNote(accountScopeDaily) || (selectedSku ? skuWowNote(selectedPeriod, periods, selectedSku) : wowNote(selectedPeriod, "netSales"));
 
   function changeAccount(value: string) {
     setAccountId(value);
     const latest = periods.filter((period) => period.accountId === value && period.kind === "weekly").sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
     if (latest) setPeriodId(latest.id);
     else setPeriodId("");
+    setPortfolioRange(null);
     setSkuId("");
   }
   function changePeriod(value: string) {
     setPeriodId(value);
+    setPortfolioRange(null);
     setSkuId("");
   }
   const post = (body: Record<string, unknown>) => fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -179,23 +191,6 @@ export default function Jarvis() {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("name") || ""), sku = String(form.get("sku") || ""), asin = String(form.get("asin") || ""), listingUrl = String(form.get("listingUrl") || "").trim();
     const item: DashboardSku = { id: `${accountId}-${sku.toLowerCase().replace(/[^a-z0-9]/g, "") || Date.now()}`, accountId, name, sku, asin, listingUrl: listingUrl || undefined, sales: 0, netSales: 0, sessions: 0, units: 0, refunds: 0, conversion: 0, adSpend: 0, adSales: 0, adOrders: 0, clicks: 0, profit: 0, storage: 0, cogs: 0, inventory: 0, fulfillable: 0, reserved: 0, transfer: 0, unsellable: 0, inbound: 0, status: "monitor", issue: "No imported history yet.", recommendation: "Include this SKU in the next Monday report package." };
     setSkus((current) => unique([...current, item])); await post({ kind: "sku", ...item }); setSkuId(item.id); setModal(null); setToast(`${sku} added.`);
-  }
-  async function addAction(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const form = new FormData(event.currentTarget);
-    const item: ActionItem = { id: `a-${Date.now()}`, accountId, skuId: String(form.get("skuId") || ""), title: String(form.get("title") || ""), detail: String(form.get("detail") || ""), status: "planned", createdAt: new Date().toISOString() };
-    setActions((current) => [item, ...current]); await post({ kind: "action", ...item }); setModal(null); setToast("Action added to this account's checklist.");
-  }
-  async function toggleAction(item: ActionItem) {
-    const completed = item.status !== "completed";
-    const updated: ActionItem = { ...item, status: completed ? "completed" : "planned", completedAt: completed ? new Date().toISOString() : null, completedPeriodId: completed ? selectedPeriod.id : null };
-    setActions((current) => unique([updated, ...current.filter((action) => action.id !== item.id)])); await post({ kind: "action", ...updated });
-    setToast(completed ? "Completed action added to this week's review notes." : "Action moved back to the open checklist.");
-  }
-  async function toggleRecommendation(index: number) {
-    const recommendation = selectedPeriod.recommendations[index];
-    const id = `rec-${selectedPeriod.id}-${index}`;
-    const existing = accountActions.find((action) => action.id === id);
-    await toggleAction(existing || { id, accountId, skuId: recommendation.skuId, title: recommendation.title, detail: recommendation.detail, status: "planned", createdAt: new Date().toISOString() });
   }
   async function processUpload(data: FormData, stayInReview: boolean) {
     setUploading(true); data.set("accountId", accountId);
@@ -238,8 +233,7 @@ export default function Jarvis() {
     <main><header><button className="menu" aria-label="Open navigation" onClick={() => setMobile(true)}><Menu /></button><label><Building2 /><select aria-label="Account" value={accountId} onChange={(event) => changeAccount(event.target.value)}>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown /></label><label><CalendarDays /><select aria-label="Saved reporting week" value={selectedPeriod.id.startsWith("empty-") ? "" : selectedPeriod.id} onChange={(event) => changePeriod(event.target.value)}><option value="" disabled>{accountPeriods.length ? "Select a saved week" : "No saved weeks"}</option>{accountPeriods.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}</select><ChevronDown /></label><button className="primary upload" onClick={() => setModal("upload")}><Upload /> Upload Reports</button></header>
 
       {view === "overview" && <section><Title eyebrow="Weekly command brief" title="Portfolio Overview" sub={`${selectedPeriod.label} · ${matchingPortfolioPeriods.length || 1} account${(matchingPortfolioPeriods.length || 1) === 1 ? "" : "s"}`} />
-        <JarvisCompanion key={`portfolio-${selectedPeriod.id}`} account={account} period={selectedPeriod} periods={periods} skus={accountSkus} actions={accountActions} scope="portfolio" portfolioMetrics={portfolioMetrics} revenueChangePercent={portfolioRevenueChange} />
-        <div className="net-revenue-hero"><div><small>PRIMARY PORTFOLIO METRIC</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(portfolioMetrics.netSales)}</strong><RevenueDelta value={portfolioRevenueChange} /></div><p>{wowNote(selectedPeriod, "netSales")} · after refunds</p></div><TrendingUp /></div>
+        <div className="net-revenue-hero"><div><small>PRIMARY PORTFOLIO METRIC</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(rangedPortfolioRevenue)}</strong><RevenueDelta value={portfolioDailyChange ?? portfolioRevenueChange} /></div><p>{portfolioRevenueNote} · after refunds</p></div><PortfolioRangePicker key={`${activePortfolioRange.startDate}:${activePortfolioRange.endDate}`} range={activePortfolioRange} selectedPeriod={selectedPeriod} open={portfolioRangeOpen} onOpenChange={setPortfolioRangeOpen} onApply={setPortfolioRange} /></div>
         <div className="overview-grid revenue-grid"><Panel title="Portfolio Net Revenue by Week" sub="Total weekly sales after refunds, including organic and ad-driven sales. Hover any week for the exact amount."><WeeklySalesChart data={portfolioWeekly} /></Panel><Panel title="JARVIS Synopsis" sub="Confirmed drivers for this saved week">{selectedPeriod.insights.slice(0, 4).map((insight, index) => <Insight key={insight.title} n={String(index + 1).padStart(2, "0")} title={insight.title}>{insight.detail}</Insight>)}</Panel></div>
         <div className="kpis secondary-kpis"><Kpi label="Net Proceeds" value={money(portfolioMetrics.netProceeds)} note={`${money(portfolioMetrics.storage)} in storage cost`} icon={<Gauge />} /><Kpi label="Ad Spend" value={money(portfolioMetrics.adSpend)} note={`${integer(portfolioMetrics.clicks)} clicks · ${integer(portfolioMetrics.units)} gross units sold`} icon={<Target />} /><Kpi label="ACoS" value={pct(portfolioMetrics.acos)} note={placementNote(selectedPeriod)} icon={<BarChart3 />} /><Kpi label="Sessions" value={integer(portfolioMetrics.sessions)} note={`${integer(portfolioMetrics.units)} ordered units`} icon={<Users />} /></div>
         <Panel title="Accounts" sub="Portfolio performance for the selected reporting week" right={<button className="secondary" onClick={() => setModal("account")}><Plus /> Add Account</button>}><Table><thead><tr><th>Account</th><th>Net Revenue</th><th>Net Proceeds</th><th>Ad Spend</th><th>ACoS</th><th>Inventory</th></tr></thead><tbody>{accounts.map((item) => { const period = periods.find((candidate) => candidate.accountId === item.id && candidate.startDate === selectedPeriod.startDate && candidate.endDate === selectedPeriod.endDate); return <tr key={item.id} onClick={() => { changeAccount(item.id); go("accounts"); }}><td><b>{item.name}</b><small>{period ? `${period.skus.length} active SKUs` : "No import for this week"}</small></td><td><b>{money(period?.metrics.netSales || 0)}</b></td><td className={(period?.metrics.netProceeds || 0) < 0 ? "bad" : ""}>{money(period?.metrics.netProceeds || 0)}</td><td>{money(period?.metrics.adSpend || 0)}</td><td>{pct(period?.metrics.acos || 0)}</td><td>{integer(period?.metrics.inventory || 0)}</td></tr>; })}</tbody></Table></Panel>
@@ -247,11 +241,10 @@ export default function Jarvis() {
 
       {view === "accounts" && <section><Title eyebrow="Account command center" title={account.name} sub={`${accountSkus.length} SKUs · ${selectedPeriod.label}`} right={<div className="buttons"><button className="secondary" onClick={() => setModal("editAccount")}><Pencil /> Edit Name</button><button className="secondary" onClick={() => setModal("sku")}><PackagePlus /> Add SKU</button><button className="primary" onClick={() => go("review")}><ClipboardCheck /> Start Weekly Business Review</button></div>} />
         <JarvisCompanion key={`account-${account.id}-${selectedPeriod.id}`} account={account} period={selectedPeriod} periods={periods} skus={accountSkus} actions={accountActions} scope="account" revenueChangePercent={netRevenueChange(selectedPeriod)} />
-        <div className="account-revenue"><div><small>{selectedSku ? "PRIMARY SKU METRIC" : "PRIMARY ACCOUNT METRIC"}</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(accountScopeMetrics.netSales)}</strong><RevenueDelta value={accountScopeRevenueChange} /></div><p>{accountScopeRevenueNote} · after refunds</p></div><div className="account-chart"><WeeklySalesChart data={accountScopeWeekly} compact /></div></div>
-        <div className="account-strip">{[["Net proceeds", money(accountScopeMetrics.netProceeds)], ["Ad spend", money(accountScopeMetrics.adSpend)], ["Sessions", integer(accountScopeMetrics.sessions)], ["FBA inventory", integer(accountScopeMetrics.inventory)], ["Open actions", String(openActionCount(selectedPeriod, accountActions, selectedSku?.id))]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
+        <div className="account-revenue"><div><small>{selectedSku ? "PRIMARY SKU METRIC" : "PRIMARY ACCOUNT METRIC"}</small><span>Net Revenue</span><div className="metric-value-row"><strong>{money(accountScopeMetrics.netSales)}</strong><RevenueDelta value={accountScopeRevenueChange} /></div><p>{accountScopeRevenueNote} · after refunds</p></div><div className="account-chart"><WeeklySalesChart data={accountScopeDaily} compact cadence="daily" /></div></div>
+        <div className="account-strip">{[["Net proceeds", money(accountScopeMetrics.netProceeds)], ["Ad spend", money(accountScopeMetrics.adSpend)], ["Sessions", integer(accountScopeMetrics.sessions)], ["FBA inventory", integer(accountScopeMetrics.inventory)]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
         <div className="tabs"><button className={!selectedSku ? "active" : ""} onClick={() => setSkuId("")}>Total</button>{accountSkus.map((sku) => <button key={sku.id} className={selectedSku?.id === sku.id ? "active" : ""} onClick={() => setSkuId(sku.id)}>{sku.name}</button>)}</div>
-        {selectedSku ? <div className="sku-grid"><Panel className="sku-main" title={selectedSku.name} sub={`${selectedSku.sku} · ${selectedSku.asin || "ASIN not mapped"}`}><div className="sku-metrics"><div><span>Net revenue</span><b>{money(selectedSku.netSales)}</b><small className="sku-metric-note">{money(selectedSku.orderedProductSales ?? selectedSku.sales)} + {money(selectedSku.b2bSales || 0)} B2B − {money(selectedSku.refundAmount || 0)} refunds</small></div>{[["Net proceeds", money(selectedSku.profit)], ["Sessions", integer(selectedSku.sessions)], ["Conversion", pct(selectedSku.conversion)], ["Ad spend", money(selectedSku.adSpend)], ["Ad sales", money(selectedSku.adSales)], ["ACoS", pct(selectedSku.adSales ? selectedSku.adSpend / selectedSku.adSales * 100 : selectedSku.adSpend ? 999 : 0)]].map(([label, value]) => <div key={label}><span>{label}</span><b className={label === "Net proceeds" && selectedSku.profit < 0 ? "bad" : ""}>{value}</b></div>)}<div><span>Total order units</span><b>{integer(selectedSku.units)}</b><small className="sku-metric-note">Includes {integer(selectedSku.b2bUnits || 0)} B2B</small></div></div></Panel><InventorySnapshot sku={selectedSku} period={selectedPeriod} periods={periods} /><ListingReputation sku={selectedSku} onSaved={(updated) => setSkus((current) => unique([...current.filter((item) => item.id !== updated.id), updated]))} onToast={setToast} /><SkuEconomicsPanel key={selectedSku.id} sku={selectedSku} onSave={saveSkuEconomics} /><Panel title="What Happened" className="danger"><p className="copy">{selectedSku.issue}</p></Panel><Panel title="Recommended Change" className="recommend"><p className="copy">{selectedSku.recommendation}</p><button className="link" onClick={() => setModal("action")}>Add to checklist <ChevronRight /></button></Panel></div> : null}
-        <ActionChecklist period={selectedPeriod} account={account} skus={accountSkus} actions={accountActions} onToggleAction={toggleAction} onToggleRecommendation={toggleRecommendation} onAdd={() => setModal("action")} />
+        {selectedSku ? <div className="sku-grid"><Panel className="sku-main" title={selectedSku.name} sub={`${selectedSku.sku} · ${selectedSku.asin || "ASIN not mapped"}`}><div className="sku-metrics"><div><span>Net revenue</span><b>{money(selectedSku.netSales)}</b><small className="sku-metric-note">{money(selectedSku.orderedProductSales ?? selectedSku.sales)} + {money(selectedSku.b2bSales || 0)} B2B − {money(selectedSku.refundAmount || 0)} refunds</small></div>{[["Net proceeds", money(selectedSku.profit)], ["Sessions", integer(selectedSku.sessions)], ["Conversion", pct(selectedSku.conversion)], ["Ad spend", money(selectedSku.adSpend)], ["Ad sales", money(selectedSku.adSales)], ["ACoS", pct(selectedSku.adSales ? selectedSku.adSpend / selectedSku.adSales * 100 : selectedSku.adSpend ? 999 : 0)]].map(([label, value]) => <div key={label}><span>{label}</span><b className={label === "Net proceeds" && selectedSku.profit < 0 ? "bad" : ""}>{value}</b></div>)}<div><span>Total order units</span><b>{integer(selectedSku.units)}</b><small className="sku-metric-note">Includes {integer(selectedSku.b2bUnits || 0)} B2B</small></div></div></Panel><InventorySnapshot sku={selectedSku} period={selectedPeriod} periods={periods} /><ListingReputation sku={selectedSku} onSaved={(updated) => setSkus((current) => unique([...current.filter((item) => item.id !== updated.id), updated]))} onToast={setToast} /><SkuEconomicsPanel key={selectedSku.id} sku={selectedSku} onSave={saveSkuEconomics} /><Panel title="What Happened" className="danger"><p className="copy">{selectedSku.issue}</p></Panel><Panel title="Recommended Change" className="recommend"><p className="copy">{selectedSku.recommendation}</p></Panel></div> : null}
         <Panel title="SKU Directory" sub={`All products attached to ${account.name}`} right={<label className="search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU or ASIN" /></label>}><Table><thead><tr><th>Product</th><th>SKU / ASIN</th><th>Net Revenue</th><th>Sessions</th><th>Units</th><th>Conversion</th><th>Inventory</th><th>Net Proceeds</th></tr></thead><tbody>{accountSkus.filter((sku) => `${sku.name}${sku.sku}${sku.asin}`.toLowerCase().includes(search.toLowerCase())).map((sku) => <tr key={sku.id} onClick={() => setSkuId(sku.id)}><td><b>{sku.name}</b></td><td>{sku.sku}<small>{sku.asin}</small></td><td><b>{money(sku.netSales)}</b></td><td>{integer(sku.sessions)}</td><td>{integer(sku.units)}</td><td>{pct(sku.conversion)}</td><td>{integer(sku.inventory)}</td><td className={sku.profit < 0 ? "bad" : ""}>{money(sku.profit)}</td></tr>)}</tbody></Table></Panel>
         {funnelPeriod && funnelPeriod.funnel.length > 0 && <Panel title="Monthly Search Funnel" sub={`Latest monthly package · ${funnelPeriod.label}`}><Table><thead><tr><th>Query</th><th>Volume</th><th>Impression Share</th><th>Click Share</th><th>Cart Share</th><th>Purchase Share</th></tr></thead><tbody>{funnelPeriod.funnel.slice(0, 15).map((item) => <tr key={item.query}><td><b>{item.query}</b></td><td>{integer(item.volume)}</td><td>{item.impressionShare === undefined ? "—" : pct(item.impressionShare)}</td><td>{item.clickShare === undefined ? "—" : pct(item.clickShare)}</td><td>{item.cartShare === undefined ? "—" : pct(item.cartShare)}</td><td>{item.purchaseShare === undefined ? "—" : pct(item.purchaseShare)}</td></tr>)}</tbody></Table></Panel>}
       </section>}
@@ -281,7 +274,6 @@ export default function Jarvis() {
       {modal === "account" && <form onSubmit={addAccount}><h2>Add Account</h2><p>Create the account once. Its SKUs, imports, notes, and history stay attached.</p><label>Account name<input name="name" required autoFocus /></label><button className="primary full">Add Account</button></form>}
       {modal === "editAccount" && <form onSubmit={editAccount}><h2>Edit Account Name</h2><p>Use the official Seller Central account name. This updates every JARVIS view without changing the saved history.</p><label>Official account name<input name="name" defaultValue={account.name} required autoFocus /></label><button className="primary full">Save Account Name</button></form>}
       {modal === "sku" && <form onSubmit={addSku}><h2>Add SKU</h2><p>Add a product manually or let the next report identify it.</p><label>Product name<input name="name" required /></label><label>Seller SKU<input name="sku" required /></label><label>ASIN<input name="asin" /></label><label>Amazon listing link<input name="listingUrl" type="url" placeholder="https://www.amazon.com/dp/..." /></label><button className="primary full">Add SKU</button></form>}
-      {modal === "action" && <form onSubmit={addAction}><h2>Add Checklist Item</h2><p>Save what changed so the next review has the context needed to explain the result.</p><label>Product<select name="skuId" defaultValue={selectedSku?.id}>{accountSkus.map((sku) => <option key={sku.id} value={sku.id}>{sku.name}</option>)}</select></label><label>Action title<input name="title" required /></label><label>Details<textarea name="detail" rows={4} /></label><button className="primary full">Add to Checklist</button></form>}
     </div></div>}
     {toast && <div className="toast"><Check />{toast}</div>}
   </div>;
@@ -292,13 +284,47 @@ function UploadForm({ account, uploading, onSubmit }: { account: Account; upload
   return <form onSubmit={onSubmit}><h2>Upload Reports</h2><p>Attach any or all weekly reports for {account.name}. JARVIS identifies each file, updates the saved week, and regenerates the account and SKU analysis.</p><div className="date-fields"><label>Week starts<input type="date" name="startDate" defaultValue={dates.start} required /></label><label>Week ends<input type="date" name="endDate" defaultValue={dates.end} required /></label></div><label className="drop"><Upload /><b>Choose Amazon report files</b><small>CSV, XLSX, XLS, or TXT · multiple files allowed</small><input name="files" type="file" accept=".csv,.xlsx,.xls,.txt" multiple required /></label><button className="primary full" disabled={uploading}>{uploading ? "Parsing reports..." : "Import and Analyze"}</button><small className="privacy-note">Original files are saved with this account. Overlapping reports update the same saved week instead of creating duplicate metrics.</small></form>;
 }
 
-function ActionChecklist({ period, account, skus, actions, onToggleAction, onToggleRecommendation, onAdd }: { period: PeriodPayload; account: Account; skus: DashboardSku[]; actions: ActionItem[]; onToggleAction: (item: ActionItem) => void; onToggleRecommendation: (index: number) => void; onAdd: () => void }) {
-  const manual = actions.filter((action) => !action.id.startsWith(`rec-${period.id}-`));
-  return <Panel title="Action Checklist" sub="Check an item when it is finished. Completed items automatically become notes in this week's business review." right={<button className="secondary" onClick={onAdd}><Plus /> Add Item</button>}><div className="checklist">
-    {period.recommendations.map((item, index) => { const saved = actions.find((action) => action.id === `rec-${period.id}-${index}`); const checked = saved?.status === "completed"; return <label className={checked ? "done" : ""} key={`${item.title}-${index}`}><input type="checkbox" checked={checked} onChange={() => onToggleRecommendation(index)} /><span className="check-box"><Check /></span><span><small>{period.skus.find((sku) => sku.id === item.skuId)?.name || account.name} · JARVIS recommendation</small><b>{item.title}</b><p>{item.detail}</p></span></label>; })}
-    {manual.map((item) => <label className={item.status === "completed" ? "done" : ""} key={item.id}><input type="checkbox" checked={item.status === "completed"} onChange={() => onToggleAction(item)} /><span className="check-box"><Check /></span><span><small>{skus.find((sku) => sku.id === item.skuId)?.name || account.name} · Added {formatDate(item.createdAt)}</small><b>{item.title}</b><p>{item.detail}</p></span></label>)}
-    {!period.recommendations.length && !manual.length && <div className="empty-checklist"><ClipboardCheck /><b>No actions yet</b><span>Add an item or import the weekly reports to generate recommendations.</span></div>}
-  </div></Panel>;
+function PortfolioRangePicker({ range, selectedPeriod, open, onOpenChange, onApply }: { range: DateRange; selectedPeriod: PeriodPayload; open: boolean; onOpenChange: (open: boolean) => void; onApply: (range: DateRange) => void }) {
+  const [draftStart, setDraftStart] = useState(range.startDate);
+  const [draftEnd, setDraftEnd] = useState(range.endDate);
+  const [month, setMonth] = useState(range.startDate.slice(0, 7));
+
+  const draftRange = normalizeRange({ startDate: draftStart, endDate: draftEnd, label: "Custom" });
+  const days = calendarDays(month);
+
+  function apply(next: DateRange) {
+    const normalized = normalizeRange(next);
+    setDraftStart(normalized.startDate);
+    setDraftEnd(normalized.endDate);
+    setMonth(normalized.startDate.slice(0, 7));
+    onApply(normalized);
+  }
+
+  function pickDay(day: string) {
+    if (!draftStart || (draftStart && draftEnd && draftStart !== draftEnd)) {
+      setDraftStart(day); setDraftEnd(day); return;
+    }
+    if (day < draftStart) { setDraftEnd(draftStart); setDraftStart(day); return; }
+    setDraftEnd(day);
+  }
+
+  return <div className="portfolio-range"><button className="range-trigger" type="button" aria-expanded={open} onClick={() => onOpenChange(!open)}><CalendarDays /><span>{range.label}</span><small>{rangeLabel(range)}</small><ChevronDown /></button>
+    {open && <div className="range-popover">
+      <div className="range-presets">
+        {(["last-week", "this-week", "last-month"] as const).map((preset) => <button key={preset} type="button" onClick={() => { apply(portfolioPresetRange(selectedPeriod, preset)); onOpenChange(false); }}>{preset === "last-week" ? "Last week" : preset === "this-week" ? "This week" : "Last month"}</button>)}
+      </div>
+      <label className="month-control">Month<input type="month" value={month} onChange={(event) => setMonth(event.target.value || month)} /></label>
+      <div className="calendar-grid" role="grid" aria-label="Choose portfolio date range">
+        {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <small key={`${day}-${index}`}>{day}</small>)}
+        {days.map((day) => {
+          const inMonth = day.startsWith(month);
+          const selected = isDateInRange(day, draftRange);
+          return <button key={day} type="button" className={`${inMonth ? "" : "muted"} ${selected ? "selected" : ""}`} aria-pressed={selected} onClick={() => pickDay(day)}>{Number(day.slice(-2))}</button>;
+        })}
+      </div>
+      <div className="range-actions"><span>{rangeLabel(draftRange)}</span><button type="button" onClick={() => { apply({ ...draftRange, label: "Custom" }); onOpenChange(false); }}>Apply</button></div>
+    </div>}
+  </div>;
 }
 
 function ListingReputation({ sku, onSaved, onToast }: { sku: DashboardSku; onSaved: (sku: DashboardSku) => void; onToast: (message: string) => void }) {
@@ -341,7 +367,7 @@ function ListingReputationInner({ sku, onSaved, onToast }: { sku: DashboardSku; 
 
 function JarvisCompanion({ account, period, periods, skus, actions, scope, portfolioMetrics, revenueChangePercent }: { account: Account; period: PeriodPayload; periods: PeriodPayload[]; skus: DashboardSku[]; actions: ActionItem[]; scope: "portfolio" | "account"; portfolioMetrics?: DashboardMetrics; revenueChangePercent?: number }) {
   const [prompt, setPrompt] = useState("");
-  const [answer, setAnswer] = useState(`Good morning. I am synchronized with ${scope === "portfolio" ? "the portfolio" : account.name} for ${period.label}. Ask me for the weekly brief, advertising performance, inventory risk, or the SKU that needs attention.`);
+  const [answer, setAnswer] = useState(`Good morning. I am synchronized with ${scope === "portfolio" ? "the portfolio" : account.name} for ${period.label}. Ask me for the previous-day brief, advertising performance, inventory risk, or the SKU that needs attention.`);
   const [phase, setPhase] = useState<JarvisPhase>("idle");
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -363,13 +389,13 @@ function JarvisCompanion({ account, period, periods, skus, actions, scope, portf
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); ask(prompt); }
 
   const status = phase === "thinking" ? "NEURAL PROCESSING" : "NEURAL CORE ONLINE";
-  const suggestions = ["How did we do last week?", "What changed week over week?", "Which SKU needs attention?", "How are ads performing?"];
+  const suggestions = ["How did yesterday compare?", "What changed day over day?", "Which SKU needs attention?", "How are ads performing?"];
   return <article className={`jarvis-command ${phase}`}>
     <div className="jarvis-visual"><NeuralCore thinking={phase === "thinking"} /><small><i /> {status}</small></div>
     <div className="jarvis-console"><div className="jarvis-console-head"><div><small>JARVIS INTELLIGENCE</small><h2>Ask the command center</h2></div></div>
       <div className="jarvis-response" aria-live="polite">{phase === "thinking" ? <><span className="thinking-dots"><i /><i /><i /></span>Cross-referencing saved account history...</> : <p>{answer}</p>}</div>
       <div className="jarvis-prompts">{suggestions.map((item) => <button key={item} onClick={() => ask(item)}>{item}</button>)}</div>
-      <form className="jarvis-chat" onSubmit={submit}><input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Ask JARVIS about last week, ads, inventory, or any SKU..." aria-label="Ask JARVIS" /><button type="submit" disabled={!prompt.trim() || phase === "thinking"} aria-label="Send question"><Send /></button></form>
+      <form className="jarvis-chat" onSubmit={submit}><input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Ask JARVIS about yesterday, ads, inventory, or any SKU..." aria-label="Ask JARVIS" /><button type="submit" disabled={!prompt.trim() || phase === "thinking"} aria-label="Send question"><Send /></button></form>
       <small className="jarvis-data-note">Answers use the selected reporting period and saved JARVIS history.</small>
     </div>
   </article>;
@@ -664,11 +690,18 @@ function buildJarvisAnswer(question: string, context: { account: Account; period
   const previous = periods.filter((item) => item.accountId === period.accountId && item.kind === "weekly" && item.endDate < period.startDate).sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
   const comparisonBase = scope === "portfolio" && changePercent !== undefined ? metrics.netSales / (1 + changePercent / 100) : priorRevenue;
   const movement = changePercent === undefined ? "This is the first saved comparison week." : `Net revenue was ${changePercent >= 0 ? "up" : "down"} ${Math.abs(changePercent).toFixed(1)}% from ${money(comparisonBase || 0)}.`;
+  const daily = periodDailyTrend([period]);
+  const latestDay = daily.at(-1);
+  const priorDay = daily.at(-2);
 
   if (namedSku) {
     const skuAcos = namedSku.adSales ? namedSku.adSpend / namedSku.adSales * 100 : namedSku.adSpend ? 999 : 0;
     const manual = namedSku.manualFbaFeePerUnit !== undefined || namedSku.manualCogsPerUnit !== undefined ? ` Manual inputs currently show ${money(namedSku.manualFbaFeePerUnit || 0)} FBA and ${money(namedSku.manualCogsPerUnit || 0)} COGS per unit.` : " Manual FBA and COGS have not both been confirmed yet.";
     return `${namedSku.name} generated ${money(namedSku.netSales)} in net revenue from ${integer(namedSku.units)} units, with ${money(namedSku.profit)} in reported net proceeds. Advertising spent ${money(namedSku.adSpend)} at ${pct(skuAcos)} ACoS. ${namedSku.issue} ${namedSku.recommendation}${manual}`;
+  }
+  if (/yesterday|previous day|day over day|daily/.test(q) && latestDay) {
+    const dailyMove = priorDay ? `${latestSalesNote(daily)} from ${formatShortDate(priorDay.startDate)}.` : "There is not a prior daily row in this selected period yet.";
+    return `${formatShortDate(latestDay.startDate)} generated ${money(latestDay.sales)} in daily net revenue for ${label}. ${dailyMove} Advertising spend for the day was ${money(period.daily.filter((item) => item.date === latestDay.startDate).reduce((total, item) => total + item.spend, 0))}.`;
   }
   if (/ad|advert|ppc|acos|campaign/.test(q)) return `${label} spent ${money(metrics.adSpend)} on advertising and attributed ${money(metrics.adSales)} in ad sales at ${pct(metrics.acos)} ACoS. That produced ${integer(metrics.adOrders)} attributed orders from ${integer(metrics.clicks)} clicks. ${period.insights.find((item) => /advert/i.test(item.title))?.detail || placementNote(period)}`;
   if (/organic/.test(q)) {
@@ -701,16 +734,16 @@ function Insight({ n, title, children }: { n: string; title: string; children: R
 function Table({ children }: { children: React.ReactNode }) { return <div className="table-wrap"><table>{children}</table></div>; }
 function ReportCard({ report, present, period }: { report: string; present: boolean; period: PeriodPayload }) { return <article className={!present ? "missing" : ""}><span>{present ? <Check /> : <AlertTriangle />}</span><div><b>{report}</b><small>{present ? `Parsed for ${period.label}` : "Not received for this view"}</small></div></article>; }
 
-function WeeklySalesChart({ data, compact = false }: { data: WeeklySalesPoint[]; compact?: boolean }) {
+function WeeklySalesChart({ data, compact = false, cadence = "weekly" }: { data: WeeklySalesPoint[]; compact?: boolean; cadence?: "weekly" | "daily" }) {
   const [hover, setHover] = useState<number | null>(null);
-  if (!data.length) return <div className={`chart-empty ${compact ? "compact" : ""}`}><BarChart3 /><b>No weekly sales history yet</b><span>Weekly SKU Economics imports will populate this chart.</span></div>;
+  if (!data.length) return <div className={`chart-empty ${compact ? "compact" : ""}`}><BarChart3 /><b>No {cadence} sales history yet</b><span>{cadence === "daily" ? "Daily report rows will populate this chart." : "Weekly SKU Economics imports will populate this chart."}</span></div>;
   const width = 640, height = compact ? 155 : 230, left = 34, right = 610, top = 24, bottom = compact ? 124 : 190;
   const max = Math.max(1, ...data.map((item) => item.sales));
   const x = (index: number) => data.length === 1 ? (left + right) / 2 : left + index * (right - left) / (data.length - 1);
   const y = (value: number) => bottom - value / max * (bottom - top);
   const points = data.map((item, index) => `${x(index)},${y(item.sales)}`).join(" ");
   const active = hover === null ? null : data[hover];
-  return <div className={`sales-chart ${compact ? "compact" : ""}`} onMouseLeave={() => setHover(null)}><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Weekly total net revenue line chart"><defs><linearGradient id={`sales-fill-${compact ? "compact" : "full"}`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#6e7bf2" stopOpacity=".32" /><stop offset="1" stopColor="#6e7bf2" stopOpacity="0" /></linearGradient></defs>{[0, 1, 2, 3].map((index) => { const lineY = top + index * (bottom - top) / 3; return <line key={index} x1={left} x2={right} y1={lineY} y2={lineY} stroke="rgba(255,255,255,0.08)" />; })}{data.length > 1 && <polygon points={`${points} ${right},${bottom} ${left},${bottom}`} fill={`url(#sales-fill-${compact ? "compact" : "full"})`} />}{data.length > 1 && <polyline points={points} fill="none" stroke="#8d9bff" strokeWidth="3" />}{data.map((item, index) => <circle key={`${item.startDate}-${item.endDate}`} cx={x(index)} cy={y(item.sales)} r={hover === index ? 6 : 4} fill="#a5b0ff" stroke="#0a1220" strokeWidth="3" tabIndex={0} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}><title>{`${item.label}: ${money(item.sales)}`}</title></circle>)}</svg>{active && <div className="chart-tooltip" style={{ left: `${(x(hover || 0) / width) * 100}%`, top: `${(y(active.sales) / height) * 100}%` }}><small>{active.label}</small><b>{money(active.sales)}</b><span>Net revenue</span></div>}{!compact && <div className="chart-dates" style={{ gridTemplateColumns: `repeat(${data.length},1fr)` }}>{data.map((item) => <span key={`${item.startDate}-${item.endDate}`}>{formatWeekRange(item.startDate, item.endDate)}</span>)}</div>}</div>;
+  return <div className={`sales-chart ${compact ? "compact" : ""}`} onMouseLeave={() => setHover(null)}><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${cadence === "daily" ? "Daily" : "Weekly"} total net revenue line chart`}><defs><linearGradient id={`sales-fill-${compact ? "compact" : "full"}`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#6e7bf2" stopOpacity=".32" /><stop offset="1" stopColor="#6e7bf2" stopOpacity="0" /></linearGradient></defs>{[0, 1, 2, 3].map((index) => { const lineY = top + index * (bottom - top) / 3; return <line key={index} x1={left} x2={right} y1={lineY} y2={lineY} stroke="rgba(255,255,255,0.08)" />; })}{data.length > 1 && <polygon points={`${points} ${right},${bottom} ${left},${bottom}`} fill={`url(#sales-fill-${compact ? "compact" : "full"})`} />}{data.length > 1 && <polyline points={points} fill="none" stroke="#8d9bff" strokeWidth="3" />}{data.map((item, index) => <circle key={`${item.startDate}-${item.endDate}`} cx={x(index)} cy={y(item.sales)} r={hover === index ? 6 : 4} fill="#a5b0ff" stroke="#0a1220" strokeWidth="3" tabIndex={0} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}><title>{`${item.label}: ${money(item.sales)}`}</title></circle>)}</svg>{active && <div className="chart-tooltip" style={{ left: `${(x(hover || 0) / width) * 100}%`, top: `${(y(active.sales) / height) * 100}%` }}><small>{active.label}</small><b>{money(active.sales)}</b><span>Net revenue</span></div>}{!compact && <div className="chart-dates" style={{ gridTemplateColumns: `repeat(${data.length},1fr)` }}>{data.map((item) => <span key={`${item.startDate}-${item.endDate}`}>{cadence === "daily" ? formatShortDate(item.startDate) : formatWeekRange(item.startDate, item.endDate)}</span>)}</div>}</div>;
 }
 
 function aggregateMetrics(periods: PeriodPayload[]): DashboardMetrics {
@@ -749,19 +782,67 @@ function mergeSkuData(periodSkus: DashboardSku[], savedSkus: DashboardSku[]) {
   }
   return [...merged.values()];
 }
+function identity(value?: string | null) { return (value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function dailyMatchesSku(item: PeriodPayload["daily"][number], sku: DashboardSku) {
+  return item.skuId === sku.id || Boolean(item.sku && sku.sku && identity(item.sku) === identity(sku.sku)) || Boolean(item.asin && sku.asin && identity(item.asin) === identity(sku.asin));
+}
+function periodDailyTrend(periods: PeriodPayload[], sku?: DashboardSku, limit = 14): WeeklySalesPoint[] {
+  const map = new Map<string, WeeklySalesPoint>();
+  for (const period of periods) {
+    const dailyRows = period.daily.filter((row) => !sku || dailyMatchesSku(row, sku));
+    const dailyTotal = dailyRows.reduce((total, row) => total + row.sales, 0);
+    const periodSku = sku ? matchingSku(period, sku) : undefined;
+    const targetTotal = sku ? periodSku?.netSales ?? sku.netSales : period.metrics.netSales;
+    const scale = dailyTotal ? targetTotal / dailyTotal : 1;
+    for (const item of dailyRows) {
+      const row = map.get(item.date) || { startDate: item.date, endDate: item.date, label: formatShortDate(item.date), sales: 0 };
+      row.sales += item.sales * scale;
+      map.set(item.date, row);
+    }
+  }
+  return [...map.values()].map((item) => ({ ...item, sales: Number(item.sales.toFixed(2)) })).sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit);
+}
+function skuDailyTrend(period: PeriodPayload, sku: DashboardSku): WeeklySalesPoint[] { return periodDailyTrend([period], sku); }
+function rangeDailyTrend(periods: PeriodPayload[], range: DateRange): WeeklySalesPoint[] { return periodDailyTrend(periods.filter((period) => period.endDate >= range.startDate && period.startDate <= range.endDate), undefined, 90).filter((item) => item.startDate >= range.startDate && item.startDate <= range.endDate); }
 function accountSalesTrend(periods: PeriodPayload[], accountId: string, throughEndDate: string, limit = 12): WeeklySalesPoint[] { return periods.filter((period) => period.kind === "weekly" && period.accountId === accountId && period.endDate <= throughEndDate).sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit).map((period) => ({ startDate: period.startDate, endDate: period.endDate, label: period.label, sales: period.metrics.netSales })); }
 function matchingSku(period: PeriodPayload, sku: DashboardSku) { return period.skus.find((candidate) => candidate.id === sku.id || Boolean(sku.sku && candidate.sku && candidate.sku.toLowerCase() === sku.sku.toLowerCase()) || Boolean(sku.asin && candidate.asin && candidate.asin.toLowerCase() === sku.asin.toLowerCase())); }
-function skuSalesTrend(periods: PeriodPayload[], accountId: string, sku: DashboardSku, throughEndDate: string, limit = 12): WeeklySalesPoint[] { return periods.filter((period) => period.kind === "weekly" && period.accountId === accountId && period.endDate <= throughEndDate).sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit).map((period) => ({ startDate: period.startDate, endDate: period.endDate, label: period.label, sales: matchingSku(period, sku)?.netSales || 0 })); }
 function previousSku(period: PeriodPayload, periods: PeriodPayload[], sku: DashboardSku) { const previousPeriod = periods.filter((candidate) => candidate.accountId === period.accountId && candidate.kind === "weekly" && candidate.endDate < period.startDate).sort((a, b) => b.endDate.localeCompare(a.endDate))[0]; return previousPeriod ? matchingSku(previousPeriod, sku) : undefined; }
 function skuNetRevenueChange(period: PeriodPayload, periods: PeriodPayload[], sku: DashboardSku) { const prior = previousSku(period, periods, sku); if (!prior) return undefined; return prior.netSales ? (sku.netSales - prior.netSales) / Math.abs(prior.netSales) * 100 : sku.netSales ? 100 : 0; }
 function skuWowNote(period: PeriodPayload, periods: PeriodPayload[], sku: DashboardSku) { const prior = previousSku(period, periods, sku); if (!prior) return "First saved comparison period"; const delta = sku.netSales - prior.netSales; return `${delta >= 0 ? "+" : ""}${money(delta)} vs prior week`; }
 function portfolioSalesTrend(periods: PeriodPayload[], throughEndDate: string, limit = 12): WeeklySalesPoint[] { const map = new Map<string, WeeklySalesPoint>(); for (const period of periods.filter((item) => item.kind === "weekly" && item.endDate <= throughEndDate)) { const key = `${period.startDate}:${period.endDate}`; const row = map.get(key) || { startDate: period.startDate, endDate: period.endDate, label: period.label, sales: 0 }; row.sales += period.metrics.netSales; map.set(key, row); } return [...map.values()].sort((a, b) => a.endDate.localeCompare(b.endDate)).slice(-limit); }
 function wowNote(period: PeriodPayload, metric: keyof DashboardMetrics, suffix = "") { const value = period.wow[metric]; if (value === undefined) return "First saved comparison period"; const direction = value > 0 ? "+" : ""; return `${direction}${suffix === "points" ? value.toFixed(1) : metric.toLowerCase().includes("sales") || metric === "netProceeds" ? money(value) : integer(value)}${suffix ? ` ${suffix}` : ""} vs prior week`; }
+function latestSalesChange(data: WeeklySalesPoint[]) { if (data.length < 2) return undefined; const current = data.at(-1)?.sales || 0, previous = data.at(-2)?.sales || 0; return previous ? (current - previous) / Math.abs(previous) * 100 : current ? 100 : 0; }
+function latestSalesNote(data: WeeklySalesPoint[]) { if (data.length < 2) return ""; const current = data.at(-1)?.sales || 0, previous = data.at(-2)?.sales || 0, delta = current - previous; return `${delta >= 0 ? "+" : ""}${money(delta)} vs previous day`; }
 function placementNote(period: PeriodPayload) { const best = period.placements.filter((item) => item.sales > 0).sort((a, b) => a.acos - b.acos)[0]; return best ? `${best.placement} performed best` : "No converting placement yet"; }
 function formatDate(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }); }
 function formatShortDate(value: string) { const parsed = new Date(`${value}T12:00:00Z`); return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }); }
 function formatWeekRange(startDate: string, endDate: string) { return `${formatShortDate(startDate)}–${formatShortDate(endDate)}`; }
-function openActionCount(period: PeriodPayload, actions: ActionItem[], skuId?: string) { const completedRecs = new Set(actions.filter((action) => action.status === "completed").map((action) => action.id)); const recommendations = period.recommendations.filter((item, index) => (!skuId || item.skuId === skuId) && !completedRecs.has(`rec-${period.id}-${index}`)).length; const manual = actions.filter((action) => (!skuId || action.skuId === skuId) && !action.id.startsWith(`rec-${period.id}-`) && action.status !== "completed").length; return recommendations + manual; }
+function dateFromInput(value: string) { return new Date(`${value}T12:00:00Z`); }
+function toDateInput(value: Date) { return value.toISOString().slice(0, 10); }
+function addDays(value: string, days: number) { const next = dateFromInput(value); next.setUTCDate(next.getUTCDate() + days); return toDateInput(next); }
+function normalizeRange(range: DateRange): DateRange { return range.startDate <= range.endDate ? range : { ...range, startDate: range.endDate, endDate: range.startDate }; }
+function rangeLabel(range: DateRange) { return range.startDate === range.endDate ? formatShortDate(range.startDate) : `${formatShortDate(range.startDate)} to ${formatShortDate(range.endDate)}`; }
+function portfolioPresetRange(period: PeriodPayload, preset: "last-week" | "this-week" | "last-month"): DateRange {
+  if (preset === "this-week") return { startDate: period.startDate, endDate: period.endDate, label: "This week" };
+  if (preset === "last-week") return { startDate: addDays(period.startDate, -7), endDate: addDays(period.endDate, -7), label: "Last week" };
+  const anchor = dateFromInput(period.startDate);
+  const start = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - 1, 1, 12));
+  const end = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 0, 12));
+  return { startDate: toDateInput(start), endDate: toDateInput(end), label: "Last month" };
+}
+function calendarDays(month: string) {
+  const [year, rawMonth] = month.split("-").map(Number);
+  const first = new Date(Date.UTC(year, (rawMonth || 1) - 1, 1, 12));
+  const offset = (first.getUTCDay() + 6) % 7;
+  const cursor = new Date(first);
+  cursor.setUTCDate(first.getUTCDate() - offset);
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(cursor);
+    day.setUTCDate(cursor.getUTCDate() + index);
+    return toDateInput(day);
+  });
+}
+function isDateInRange(day: string, range: DateRange) { const normalized = normalizeRange(range); return day >= normalized.startDate && day <= normalized.endDate; }
 function executiveSummary(period: PeriodPayload) { const change = period.wow.netSales; const movement = change === undefined ? "This is the first saved comparison period." : `Net revenue ${change >= 0 ? "increased" : "declined"} ${money(Math.abs(change))} week over week.`; const profit = period.metrics.netProceeds >= 0 ? `The account produced ${money(period.metrics.netProceeds)} in net proceeds.` : `The account reported a ${money(Math.abs(period.metrics.netProceeds))} loss after Amazon costs and advertising.`; return `${movement} ${profit} ${integer(period.metrics.sessions)} sessions produced ${integer(period.metrics.units)} units, while advertising ran at ${pct(period.metrics.acos)} ACoS.`; }
 function netRevenueChange(period: PeriodPayload) { const delta = period.wow.netSales; if (delta === undefined) return undefined; const previous = period.metrics.netSales - delta; return previous ? delta / Math.abs(previous) * 100 : period.metrics.netSales ? 100 : 0; }
 function portfolioNetRevenueChange(current: PeriodPayload[], all: PeriodPayload[]) { const previous = current.map((period) => all.filter((candidate) => candidate.accountId === period.accountId && candidate.kind === "weekly" && candidate.endDate < period.startDate).sort((a, b) => b.endDate.localeCompare(a.endDate))[0]).filter((period): period is PeriodPayload => Boolean(period)); if (!previous.length) return undefined; const currentRevenue = current.reduce((total, period) => total + period.metrics.netSales, 0); const previousRevenue = previous.reduce((total, period) => total + period.metrics.netSales, 0); return previousRevenue ? (currentRevenue - previousRevenue) / Math.abs(previousRevenue) * 100 : currentRevenue ? 100 : 0; }

@@ -26,7 +26,25 @@ export const seedPeriod: PeriodPayload = {
   id: "caldwell:2026-07-19:2026-07-25", accountId: "caldwell", startDate: "2026-07-19", endDate: "2026-07-25", label: "Jul 19, 2026 to Jul 25, 2026", kind: "weekly", status: "critical",
   metrics: { grossSales: 260.89, netSales: 195.92, netProceeds: -346.98, storage: 184.01, adSpend: 214.84, adSales: 286.87, clicks: 390, adOrders: 13, sessions: 432, units: 12, refunds: 3, inventory: 735, fulfillable: 577, acos: 74.9, tacos: 82.35, conversion: 2.78 },
   wow: {}, skus: seedSkus,
-  daily: [["2026-07-19", 48.89, 23.99], ["2026-07-20", 32.06, 0], ["2026-07-21", 25.54, 64.97], ["2026-07-22", 23.44, 49.98], ["2026-07-23", 26.71, 24.99], ["2026-07-24", 24.96, 66.97], ["2026-07-25", 33.24, 55.97]].map(([date, spend, sales]) => ({ date: String(date), spend: Number(spend), sales: Number(sales), orders: 0, clicks: 0 })),
+  daily: [
+    ["2026-07-19", "coffee", 27.89, 23.99],
+    ["2026-07-20", "coffee", 0, 0],
+    ["2026-07-21", "mixing", 18.2, 47.98],
+    ["2026-07-21", "salt", 7.34, 16.99],
+    ["2026-07-22", "mixing", 10.63, 24.99],
+    ["2026-07-22", "pasta", 12.81, 24.99],
+    ["2026-07-23", "knife", 18.77, 22.99],
+    ["2026-07-23", "mixing", .49, 2],
+    ["2026-07-23", "salt", 7.45, 0],
+    ["2026-07-24", "knife", 39.41, 66.97],
+    ["2026-07-25", "knife", 32.82, 35.98],
+    ["2026-07-25", "pasta", .42, 19.99],
+    ["2026-07-25", "shelf", 3.8, 0],
+    ["2026-07-25", "smoker", 2.61, 0],
+  ].map(([date, skuId, spend, sales]) => {
+    const sku = seedSkus.find((item) => item.id === skuId);
+    return { date: String(date), skuId: String(skuId), sku: sku?.sku, asin: sku?.asin, spend: Number(spend), sales: Number(sales), orders: 0, clicks: 0 };
+  }),
   insights: [
     { title: "Storage cost buried the period", detail: "$184.01 in aged-inventory storage accounted for 53% of the reported loss.", tone: "critical" },
     { title: "Advertising carried demand", detail: "Campaigns attributed $286.87 from $214.84 in spend, but ACoS remained 74.9%.", tone: "attention" },
